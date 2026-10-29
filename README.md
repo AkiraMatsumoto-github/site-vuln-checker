@@ -1,5 +1,7 @@
 # サイト脆弱性チェッカー（Site Vulnerability Checker）
 
+[![CI](https://github.com/AkiraMatsumoto-github/site-vuln-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/AkiraMatsumoto-github/site-vuln-checker/actions/workflows/ci.yml)
+
 いま開いているサイトの技術構成（WordPress / PHP / プラグイン / JS ライブラリ）を推定し、
 **「既知の脆弱性（軸A）」と「サポート終了・更新遅れ（軸B）」**の 2 軸で「更新すべきもの」を示す企画。
 企画書は [`docs/proposal.md`](docs/proposal.md)。
