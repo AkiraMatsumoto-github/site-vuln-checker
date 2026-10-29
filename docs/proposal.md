@@ -3,8 +3,8 @@
 - 名称: **サイト脆弱性チェッカー**（英: Site Vulnerability Checker／短縮 SVC）
 - **内部名**: リポジトリ `site-vuln-checker` / Python パッケージ `site_vuln_checker` / CLI `svc-survey`・`svc-report`
 - **名称の制約（重要）**: 製品名・拡張名・ドメインに **「WordPress」「WP」を含めない**。WordPress Foundation の商標ポリシーで、製品名・サービス名・ドメイン名への使用は**許可制**のため（「◯◯ for WordPress」の形か、**説明文での言及**に留める）。詳細は 20.3
-- 版: **0.9（ドラフト）** ← 名称決定に合わせてディレクトリ・パッケージ・CLI 名を統一
-- 作成日: 2026-10-29（0.2〜0.9 も同日改訂）
+- 版: **0.10（ドラフト）** ← NVD 取り込みの実装と実測を反映（4.3 を実データで書き換え）
+- 作成日: 2026-10-29（0.2〜0.10 も同日改訂）
 - 対象読者: 意思決定者、実装担当
 - 関連する既存資産
   - 既存の MV3 拡張（非公開）… Manifest V3 + サイドパネル + `chrome.scripting` の雛形。UI と権限の扱いはこれを踏襲する
@@ -171,22 +171,42 @@
 - **ライセンス画面**（拡張の設定＋ダッシュボードのフッター）に、上表をそのまま掲載する。
 - 「データは各提供元のものであり、本サービスはそれを再配布している」旨と、各ソースのリンクを置く。
 
-### 4.3 WordPress プラグインの修正版をどう取るか（新方式の中核）
+### 4.3 WordPress プラグインの影響範囲をどう取るか（実装済み・v0.10）
+
+**NVD の本文には書き方が 3 通りある**（実データで確認）。1 種類だけ対応すると大半を取りこぼす。
+
+| 本文の言い回し（実例） | 意味 | 索引のフィールド | 実測の割合 |
+| --- | --- | --- | --- |
+| `before 5.9.9` / `prior to 1.2.3` | 5.9.9 **未満**が影響 | `affected_below`（＝修正版として使える） | 46 / 188 件（24%） |
+| `1.7 and earlier` | 1.7 **以下**が影響 | `affected_upto` | 142 / 188 件（**76%**） |
+| `all versions up to, and including, 3.29.11` | 3.29.11 **以下**が影響 | `affected_upto` | 〃 |
+
+> **「before X」だけを実装していたら、76% を取りこぼしていた。** 直近 14 日・200 件の実測（8.5）で分かった、この節の最大の学び。
+
+**処理の流れ（`svc-ingest` として実装済み）**
 
 ```
-入力: slug（サイトの /wp-content/plugins/<slug>/ から抽出）
-1. name = WordPress.org Plugin API(slug).name        # 例: "Contact Form 7"
-2. cand = NVD を本文検索（name を含み "WordPress plugin" を含む CVE）
-3. for cve in cand:
-       m = /before\s+(\d+(?:\.\d+)+)/ を本文に適用
-       if m: fixed = m[1]                          # 「before 5.9.9」→ 5.9.9
-4. detected_version < fixed → 該当（確度 0.6〜0.8）
-5. 名前の一致が弱い（一般名詞・部分一致）→ 灰（判定不能）
+1. NVD を keywordSearch（"WordPress plugin"）＋公開日で取得（lastMod 指定で差分取得も可）
+2. 本文から名前を抽出    : /\bthe\s+(.+?)\s+(?:wordpress\s+)?plugin\b/i
+3. 本文から影響範囲を抽出: before X → affected_below
+                          X and earlier → affected_upto
+                          up to, and including, X → affected_upto
+4. CVSS を取得（V40 → V31 → V30 → V2 の順）
+5. 索引（advisories.json）に保存。取り込めなかった CVE は**理由つきで集計**
 ```
 
-- **誤マッチ対策**: 表示名が一般名詞（"Contact Form" など）だと誤爆するため、`slug` のトークンと `name` の一致率で足切りし、弱ければ灰に落とす。
-- **CPE との併用**: NVD の `virtualMatchString` で `cpe:2.3:a:*:<slug>:*:*:*:*:wordpress:*:*` を引ければ、本文解析より確実。**一致率は P0-13 で実測**し、良ければ優先する。
-- **「before X」が無い場合**: 修正版不明として「修正版不明（要確認）」と表示する。ここを推測で埋めない。
+**照合（`advisories.py`）— ここが実運用のヤマ**
+
+- 検出は **slug**（`/wp-content/plugins/my-calendar/`）、CVE は**表示名**（"My Calendar – Accessible Event Manager"）で、そのままでは一致しない
+- 対策は 3 段階：①slug 完全一致 → ②表示名の完全一致 → ③**表示名の前方一致**（slug が 6 文字以上）
+- 実例：`my-calendar` 3.8.7 → `CVE-2026-104798`（CVSS 9.8）に**赤**で一致（`my-calendar-…` の前方一致）
+- 誤爆よけ：短い slug（`seo` など）は前方一致させない。一致が弱ければ**灰**
+
+**鉄則（実装で守っていること）**
+
+- **版が特定できない CVE は取り込まない**（推測で埋めない）。除外理由は「プラグイン名を特定できない」「影響バージョンを特定できない」で可視化する
+- `affected_upto` しか無い勧告は**修正版が分からない**ので、「修正版不明（ベンダに確認）」と表示する
+- CPE（`cpe:2.3:a:*:<slug>:*:*:*:*:wordpress:*:*`）による照合は**将来の補完**。一致率は P0-13 で実測してから優先する
 
 ---
 
@@ -576,7 +596,9 @@ score = round(clamp(base, 0, 100) × confidence_weight)
 | 「脆弱性はありません」 | 「バージョンが分からず判定できないものが 3 件あります」 |
 | 「全プラグインを検査しました」 | 「画面に出ているプラグイン 5 件を検査しました（管理画面専用は対象外）」 |
 
-### 8.5 実測（P0-21 の初回・n=4）
+### 8.5 実測（P0-21 n=4 ／ NVD 取り込み・v0.10）
+
+#### (a) 外部から何が取れるか（n=4）
 
 対象: `wordpress.org` / `ja.wordpress.org` / `php.net` / `example.com`（2026-10-29、各 1 リクエスト・delay 1s）
 
@@ -592,6 +614,22 @@ score = round(clamp(base, 0, 100) × confidence_weight)
 - **サンプル 4 件なので参考値**。ただし「PHP とサーバのバージョンは外からほぼ取れない」は 8.1 の見込みを**むしろ悲観側に裏切る**結果で、**PHP を外部検出に頼る設計は成立しない**ことが確かめられた。
 - そのため KPI の「PHP 版数の特定率（外部）30% 以上」は、実測次第で**「計測して記録する（目標値を設けない）」に変える**（P0-21 本番で判断）。
 - 再現手順: `uv run svc-survey --urls <自分のリスト> --delay 1.0` → `uv run svc-report` で HTML 化。
+
+#### (b) NVD からの取り込み（P0-19 の初回）
+
+条件: `keywordSearch="WordPress plugin"` / 直近 14 日 / 上限 200 件 / API キーあり（0.6 秒間隔）
+
+| 指標 | 実測 | メモ |
+| --- | --- | --- |
+| 取得 | 200 件 | 1 ページ（200 件/ページ） |
+| **取り込み（索引に載った）** | **188 件（94%）** | パース成功率は十分 |
+| 除外 | 12 件 | プラグイン名を特定できない 7 / 影響バージョンを特定できない 5 |
+| **`affected_below`（before X）** | 46 件（24%） | 修正版がそのまま分かる |
+| **`affected_upto`（X 以下）** | **142 件（76%）** | **これが無いと 76% を取りこぼす** |
+| CVSS が取れた | 188 件（100%） | スコア無しは 0 |
+
+- **設計の修正につながった**: 当初の 4.3 は `before X` だけを想定していた。実データは `up to, and including, X` が主流で、**そのままでは 4 分の 3 を判定できなかった**。
+- 端末での確認：`my-calendar` 3.8.7（実在の slug・架空の版）→ `CVE-2026-104798`（CVSS 9.8）に**赤**で一致。
 
 ---
 
@@ -753,8 +791,8 @@ CREATE TABLE affected (
   range_type    TEXT NOT NULL,             -- ECOSYSTEM | SEMVER | GIT
   branch        TEXT,                      -- 8.3 / 6.2（コア製品はブランチごとに修正版が違う）
   introduced    TEXT,
-  fixed         TEXT,
-  last_affected TEXT,
+  fixed         TEXT,                      -- 「before X」の X（修正版）
+  last_affected TEXT,                      -- 「X 以下が影響」（affected_upto）
   platform      TEXT,                      -- 例: wordpress-plugin
   UNIQUE(vuln_id, ecosystem, package, introduced, fixed, last_affected)
 );
@@ -1068,6 +1106,7 @@ v0.2 で **BYOK は廃止**した。理由は、不特定多数への無料提�
 | P0-17 | **EOL データの精度**（PHP・jQuery・Bootstrap・AngularJS の EOL 日を php.net / endoflife.date と突き合わせ） | 誤り 0 件 |
 | P0-18 | Site Health（`site-health.php?tab=debug`）の DOM から PHP・DB・プラグイン一覧を抽出できるか | 5 サイト中 5 件で取得、誤抽出 0 |
 | P0-19 | **PHP の「CVE → ブランチ別の修正版」を機械的に作れるか**（php.net チェンジログ／`php-src` アドバイザリ／NVD CPE） | 対象 CVE の 80% 以上で修正版が取れる |
+| P0-19b | **WordPress プラグインの CVE から影響範囲を取れるか**（NVD 本文の 3 形態） | → **実測 94%（188/200）**。うち「X 以下」が 76%（8.5b） |
 | P0-20 | **「パッチ未適用」を正しく検出できるか**（WP コア・プラグイン 10 サイトで、1 つ前のパッチ版を使っているケースを検証） | 誤り 0 件、見逃し 1 件以下 |
 | P0-21 | **外部判定率の実測（50 サイト）**: プラットフォーム／コア版／プラグイン検出数／プラグイン版特定／PHP 版／サーバ版 を集計 | 8.1 の見込み値を実測で置き換える（**この数字が企画の説得力になる**） |
 | P0-22 | アセット結合・遅延読み込み系プラグイン導入サイトでの検出落ちの程度 | 落ち方を把握し、`readme.txt` 補完の効果を測る |
@@ -1386,7 +1425,7 @@ WordPress Foundation の商標ポリシー（2026-10-29 に確認）:
 
 ---
 
-## 23. 変更点（v0.2 / v0.3）
+## 23. 変更点（v0.2〜v0.10）
 
 | # | 項目 | v0.1 | **v0.2** | 理由 |
 | --- | --- | --- | --- | --- |
@@ -1467,6 +1506,16 @@ WordPress Foundation の商標ポリシー（2026-10-29 に確認）:
 | 40 | CLI | `vulnlens-survey` / `vulnlens-report` | **`svc-survey` / `svc-report`**（SVC = Site Vulnerability Checker） | 短く、名前に由来する |
 | 41 | User-Agent | `VulnLens-PoC/0.1` | **`SVC-PoC/0.1`** | 取得先に名乗る文字列も新名称に合わせる |
 
+### v0.10 の変更点（NVD 取り込みの実装と実測）
+
+| # | 項目 | v0.9 | **v0.10** | 理由 |
+| --- | --- | --- | --- | --- |
+| 42 | 影響範囲の表現 | `before X` のみ（`affected_below`） | **3 形態に対応**（`before X` / `X and earlier` / `up to, and including, X`）。後半 2 つは `affected_upto` | 実測で **76% が「X 以下」**。片方だけでは 4 分の 3 を取りこぼす（4.3・8.5b） |
+| 43 | 照合方式 | slug の完全一致 | **slug 完全一致 → 表示名の完全一致 → 表示名の前方一致**（6 文字以上） | 検出は slug、CVE は表示名で、そのままでは一致しない |
+| 44 | 取り込み | 未実装 | **`svc-ingest` を実装**（NVD → 索引）。除外は理由つきで集計 | 手作業では追えない（14 日で 200 件） |
+| 45 | データモデル | `fixed` / `last_affected` | `affected_upto` を `last_affected` に対応づけ | DDL との整合 |
+| 46 | 実測 | n=4（外部検出） | **＋ NVD 取り込み**（94% / 76% / CVSS 100%） | 見込みを実測で置換 |
+
 ---
 
 ## 24. 参考資料
@@ -1529,3 +1578,4 @@ WordPress Foundation の商標ポリシー（2026-10-29 に確認）:
 | **0.7** | 2026-10-29 | **PoC を実装**（`site-vuln-checker`）。外部判定（detect）・礼儀正しい取得（fetch）・巡回 CLI（survey）・HTML 可視化（report）・Site Health 解析（sitehealth）。テスト 12 件・ruff クリーン。**n=4 の初回実測を 8.5 に追加**（コア版 100%／PHP・サーバ版 0%）。JS は Node 不在のため Python を正解データとして移植する方針 |
 | **0.8** | 2026-10-29 | **名称を「サイト脆弱性チェッカー」に決定**（英: Site Vulnerability Checker）。当初案「WordPress 脆弱性チェッカー」は、**WordPress Foundation の商標ポリシーが製品名・サービス名・ドメイン名への使用を許可制**としているため不採用とし、**20.3 名称と商標**を追加。manifest・比較表・CWS 説明文を新名称に更新 |
 | **0.9** | 2026-10-29 | **ディレクトリ・Python パッケージ・CLI・User-Agent を新名称に統一**（`site-vuln-checker` / `site_vuln_checker` / `svc-survey`・`svc-report` / `SVC-PoC`）。旧名 `vulnlens` の残存を解消 |
+| **0.10** | 2026-10-29 | **NVD 取り込みを実装し、実測で 4.3 を書き換え**。本文の言い回しは 3 形態あり、**76% が「X 以下」（`affected_upto`）** と判明。当初の `before X` だけの設計では 4 分の 3 を取りこぼすため、スキーマ・判定・照合（前方一致）を修正。実測 94%（188/200）を 8.5b に追加 |
