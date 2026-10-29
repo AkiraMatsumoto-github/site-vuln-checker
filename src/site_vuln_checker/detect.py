@@ -222,7 +222,7 @@ def _detect_plugins(resources: list[str], html: str) -> list[Finding]:
     バージョンは ``?ver=`` から取る（取れなければ ``None`` のまま）。
     """
     evidence: dict[str, list[str]] = {}
-    versions: dict[str, tuple[str, float, list[str]]] = {}
+    candidates: dict[str, list[str]] = {}
     from_resources: set[str] = set()
 
     for url in resources:
@@ -233,8 +233,8 @@ def _detect_plugins(resources: list[str], html: str) -> list[Finding]:
         from_resources.add(slug)
         evidence.setdefault(slug, []).append(f"asset:{_basename(url)}")
         ver = _query_version(url)
-        if ver and slug not in versions:
-            versions[slug] = (ver, 0.85, [f"asset:?ver={ver}"])
+        if ver:
+            candidates.setdefault(slug, []).append(ver)
 
     # インラインの URL（JSON や CSS 内）も拾う。根拠は弱く、有効とも言えない。
     for m in _WP_PLUGIN_PATH_RE.finditer(html):
@@ -244,10 +244,15 @@ def _detect_plugins(resources: list[str], html: str) -> list[Finding]:
     for slug, items in evidence.items():
         unique = tuple(dict.fromkeys(items))
         active = True if slug in from_resources else None
-        if slug in versions:
-            ver, conf, extra = versions[slug]
+        versions = candidates.get(slug) or []
+        if versions:
+            # 同じ slug に複数の ?ver= がある（管理画面用 CSS と本体 JS など）。
+            # 最初の 1 つではなく**最頻値**を採る（同数なら最初に出たもの）。
+            ver = Counter(versions).most_common(1)[0][0]
             findings.append(
-                Finding("plugin", slug, ver, conf, (*unique[:1], *extra), active=active)
+                Finding(
+                    "plugin", slug, ver, 0.85, (*unique[:1], f"asset:?ver={ver}"), active=active
+                )
             )
         else:
             findings.append(Finding("plugin", slug, None, 0.6, unique, active=active))

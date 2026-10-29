@@ -105,3 +105,17 @@ def test_inline_only_plugin_is_unknown_not_active() -> None:
     plugin = _get(analysis, "plugin", "only-inline")
     assert plugin.active is None
     assert plugin.version is None
+
+
+def test_plugin_version_uses_most_common_query_version() -> None:
+    """同じ slug に複数の ?ver= があるときは最頻値を採る（レビュー M8）。"""
+    html = """
+    <html><head>
+      <link rel="stylesheet" href="/wp-content/plugins/contact-form-7/admin.css?ver=1.0">
+      <script src="/wp-content/plugins/contact-form-7/app.js?ver=5.9.8"></script>
+      <script src="/wp-content/plugins/contact-form-7/extra.js?ver=5.9.8"></script>
+    </head><body></body></html>
+    """
+    analysis = analyze("https://example.com/", html, {})
+    plugin = _get(analysis, "plugin", "contact-form-7")
+    assert plugin.version == "5.9.8", "先頭の 1.0 ではなく最頻値"

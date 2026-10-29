@@ -41,6 +41,11 @@ _UPTO_INCLUDING_RE = re.compile(
     rf"\b(?:up\s+to,?\s*(?:and\s+)?including|through)\s*,?\s*(?:version\s+)?(?P<v>{_VERSION})",
     re.I,
 )
+#: fixed in 2.0.0 / fixed in version 2.0.0（修正版が書かれている形）
+_FIXED_IN_RE = re.compile(rf"\bfix(?:ed)?\s+in\s+(?:version\s+)?(?P<v>{_VERSION})", re.I)
+
+#: 1 つの CVE が複数プラグインを列挙することがある（上限は誤取り込みよけ）
+MAX_NAMES_PER_CVE = 5
 
 
 def english_description(cve: dict[str, Any]) -> str:
@@ -51,13 +56,22 @@ def english_description(cve: dict[str, Any]) -> str:
     return ""
 
 
+def extract_names(description: str) -> list[str]:
+    """「The ◯◯ plugin」を**すべて**取り出す（1 つの CVE が複数プラグインを列挙する形がある）。"""
+    names: list[str] = []
+    for match in _NAME_RE.finditer(description):
+        name = re.sub(r"\s+", " ", match.group("name")).strip(" .,-")
+        if name and name not in names:
+            names.append(name)
+        if len(names) >= MAX_NAMES_PER_CVE:
+            break
+    return names
+
+
 def extract_name(description: str) -> str | None:
-    """「The ◯◯ plugin for WordPress」からプラグイン名を取る。"""
-    match = _NAME_RE.search(description)
-    if not match:
-        return None
-    name = re.sub(r"\s+", " ", match.group("name")).strip(" .,-")
-    return name or None
+    """最初のプラグイン名（後方互換）。"""
+    names = extract_names(description)
+    return names[0] if names else None
 
 
 def _scope(description: str) -> str:
@@ -84,6 +98,9 @@ def extract_range(description: str) -> tuple[str | None, str | None]:
         return None, match.group("v")
     if match := _UPTO_BEFORE_RE.search(scope):
         return None, match.group("v")
+    # 「fixed in 2.0.0」は「2.0.0 未満が影響」と同じ意味（レビュー M5）
+    if match := _FIXED_IN_RE.search(scope):
+        return match.group("v"), None
     return None, None
 
 
@@ -106,47 +123,63 @@ def nvd_url(cve_id: str, references: list[dict[str, Any]]) -> str:
     return f"https://nvd.nist.gov/vuln/detail/{cve_id}"
 
 
-def parse_cve(item: dict[str, Any]) -> tuple[Advisory | None, str]:
-    """1 件の CVE を勧告に変換する。変換できないときは理由を返す。"""
+def parse_cves(item: dict[str, Any]) -> tuple[list[Advisory], str]:
+    """1 件の CVE を勧告に変換する（複数プラグインを列挙していれば複数返す）。
+
+    変換できないときは空リストと理由を返す（推測で埋めない）。
+    """
     cve = item.get("cve") or {}
     cve_id = str(cve.get("id") or "")
     description = english_description(cve)
     if not cve_id or not description:
-        return None, "ID か説明が無い"
+        return [], "ID か説明が無い"
 
-    name = extract_name(description)
-    if not name:
-        return None, "プラグイン名を特定できない"
+    names = extract_names(description)
+    if not names:
+        return [], "プラグイン名を特定できない"
 
     below, upto = extract_range(description)
     if not below and not upto:
-        return None, "影響バージョンを特定できない"
+        return [], "影響バージョンを特定できない"
 
-    advisory = Advisory(
-        id=cve_id,
-        name=name,
-        affected_below=below,
-        affected_upto=upto,
-        fixed=below,  # 「before X」の X はそのまま修正版として使える
-        cvss=extract_cvss(cve),
-        source="nvd",
-        url=nvd_url(cve_id, cve.get("references") or []),
-    )
-    return advisory, "ok"
+    cvss = extract_cvss(cve)
+    url = nvd_url(cve_id, cve.get("references") or [])
+    advisories = [
+        Advisory(
+            id=cve_id,
+            name=name,
+            affected_below=below,
+            affected_upto=upto,
+            fixed=below,  # 「before X」の X はそのまま修正版として使える
+            cvss=cvss,
+            source="nvd",
+            url=url,
+        )
+        for name in names
+    ]
+    return advisories, "ok"
+
+
+def parse_cve(item: dict[str, Any]) -> tuple[Advisory | None, str]:
+    """最初の 1 件だけを返す（後方互換・テスト用）。"""
+    advisories, reason = parse_cves(item)
+    return (advisories[0] if advisories else None), reason
 
 
 def build_index(
     items: list[dict[str, Any]], *, generated_at: str | None = None
 ) -> AdvisoryIndex:
-    """CVE のリストから索引を作る（ID で重複を除く）。"""
+    """CVE のリストから索引を作る（同じ CVE・同じ名前の重複を除く）。"""
     advisories: list[Advisory] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for item in items:
-        advisory, _reason = parse_cve(item)
-        if advisory is None or advisory.id in seen:
-            continue
-        seen.add(advisory.id)
-        advisories.append(advisory)
+        parsed, _reason = parse_cves(item)
+        for advisory in parsed:
+            key = (advisory.id, advisory.key)
+            if key in seen:
+                continue
+            seen.add(key)
+            advisories.append(advisory)
     return AdvisoryIndex(
         advisories=advisories,
         generated_at=generated_at or datetime.now(UTC).isoformat(timespec="seconds"),
@@ -154,21 +187,29 @@ def build_index(
 
 
 def summarize(items: list[dict[str, Any]]) -> dict[str, int]:
-    """取り込みの内訳（取り込めた数・理由別の除外数）。索引の件数と一致させる。"""
-    stats = {"total": len(items), "kept": 0, "skipped": 0}
-    seen: set[str] = set()
+    """取り込みの内訳。
+
+    - ``kept``: 索引に寄与した CVE の数
+    - ``advisories``: 索引のレコード数（複数プラグインを列挙する CVE は 2 以上）
+    - ``skipped``: 除外した CVE の数（理由別にも数える）
+    """
+    stats = {"total": len(items), "kept": 0, "skipped": 0, "advisories": 0}
+    seen: set[tuple[str, str]] = set()
     for item in items:
-        advisory, reason = parse_cve(item)
-        if advisory is None:
+        parsed, reason = parse_cves(item)
+        if not parsed:
             stats["skipped"] += 1
             stats[reason] = stats.get(reason, 0) + 1
             continue
-        if advisory.id in seen:
+        fresh = [a for a in parsed if (a.id, a.key) not in seen]
+        if not fresh:
             stats["skipped"] += 1
             stats["重複"] = stats.get("重複", 0) + 1
             continue
-        seen.add(advisory.id)
+        for advisory in fresh:
+            seen.add((advisory.id, advisory.key))
         stats["kept"] += 1
+        stats["advisories"] += len(fresh)
     return stats
 
 
@@ -220,9 +261,12 @@ def main(argv: list[str] | None = None) -> int:
     index = build_index(items)
     save(index, args.out)
 
-    print(f"\n取得 {stats['total']} 件 → 取り込み {stats['kept']} 件 / 除外 {stats['skipped']} 件")
+    print(
+        f"\n取得 {stats['total']} 件 → 取り込み {stats['kept']} 件"
+        f"（勧告 {stats['advisories']} 件）/ 除外 {stats['skipped']} 件"
+    )
     for key, value in sorted(stats.items()):
-        if key in {"total", "kept", "skipped"}:
+        if key in {"total", "kept", "skipped", "advisories"}:
             continue
         print(f"  除外理由: {key} … {value} 件")
     below = sum(1 for a in index.advisories if a.affected_below)

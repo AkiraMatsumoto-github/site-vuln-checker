@@ -163,3 +163,22 @@ def test_load_broken_index_raises_value_error(tmp_path: Path) -> None:
     bad.write_text("{ not json", encoding="utf-8")
     with pytest.raises(ValueError, match="索引を読めません"):
         AdvisoryIndex.load(bad)
+
+
+def test_prefix_lookup_scales_to_large_index() -> None:
+    """前方一致は索引が大きくても正しく引ける（レビュー M4）。"""
+    advisories = [
+        Advisory(id=f"CVE-2026-{i:05d}", name=f"Plugin Number {i}", affected_below="9.9.9")
+        for i in range(2000)
+    ]
+    advisories.append(
+        Advisory(id="CVE-2026-99999", name="My Calendar - Accessible Event Manager",
+                 affected_upto="3.8.7", cvss=9.8)
+    )
+    index = AdvisoryIndex(advisories=advisories)
+
+    found = index.advisories_for(Finding("plugin", "my-calendar", None, 0.6))
+    assert [a.id for a in found] == ["CVE-2026-99999"]
+    # 名前の完全一致も拾える
+    found_exact = index.advisories_for(Finding("plugin", "plugin-number-10", None, 0.6))
+    assert [a.id for a in found_exact] == ["CVE-2026-00010"]

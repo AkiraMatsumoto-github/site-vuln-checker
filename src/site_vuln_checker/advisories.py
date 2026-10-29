@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -51,11 +52,6 @@ def normalize_slug(text: str) -> str:
 
 #: 前方一致で拾うための最小長。短すぎる slug（"seo" など）は誤爆するので対象外。
 MIN_PREFIX_MATCH = 6
-
-
-def _starts_with_word(text: str, prefix: str) -> bool:
-    """``text`` が ``prefix`` で始まるか（単語境界で区切る）。"""
-    return text == prefix or text.startswith(f"{prefix}-")
 
 
 def is_affected(version: str, advisory: Advisory) -> bool:
@@ -154,9 +150,14 @@ class AdvisoryIndex:
     source_path: Path | None = None
 
     def __post_init__(self) -> None:
+        # 索引は生成時に固定する（生成後に `advisories` を足しても反映されない）。
+        # 前方一致を O(log n) で引くために、正規化した名前を並べ替えて持つ。
         self._by_key: dict[str, list[Advisory]] = {}
+        self._by_name: dict[str, list[Advisory]] = {}
         for advisory in self.advisories:
             self._by_key.setdefault(advisory.key, []).append(advisory)
+            self._by_name.setdefault(normalize_slug(advisory.name), []).append(advisory)
+        self._sorted_names: list[str] = sorted(self._by_name)
 
     def lookup(self, name_or_slug: str) -> list[Advisory]:
         return list(self._by_key.get(normalize_slug(name_or_slug), ()))
@@ -170,17 +171,25 @@ class AdvisoryIndex:
         """
         slug = normalize_slug(finding.name)
 
-        found = self.lookup(slug)
+        found = self._by_key.get(slug)
         if found:
-            return found
+            return list(found)
 
-        exact = [a for a in self.advisories if normalize_slug(a.name) == slug]
+        exact = self._by_name.get(slug)
         if exact:
-            return exact
+            return list(exact)
 
-        if len(slug) >= MIN_PREFIX_MATCH:
-            return [a for a in self.advisories if _starts_with_word(normalize_slug(a.name), slug)]
-        return []
+        if len(slug) < MIN_PREFIX_MATCH:
+            return []
+
+        # 前方一致は「slug-」で始まる名前だけ。並べ替え済みなので開始位置を二分探索する。
+        prefix = f"{slug}-"
+        matched: list[Advisory] = []
+        index = bisect_left(self._sorted_names, prefix)
+        while index < len(self._sorted_names) and self._sorted_names[index].startswith(prefix):
+            matched.extend(self._by_name[self._sorted_names[index]])
+            index += 1
+        return matched
 
     @classmethod
     def from_dict(cls, data: dict, source_path: Path | None = None) -> AdvisoryIndex:

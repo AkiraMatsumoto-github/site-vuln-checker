@@ -9,6 +9,7 @@ from site_vuln_checker.ingest import (
     extract_name,
     extract_range,
     parse_cve,
+    parse_cves,
     summarize,
 )
 
@@ -29,6 +30,13 @@ DESC_NO_VERSION = "The Example plugin for WordPress is vulnerable to an unknown 
 DESC_OTHER_PRODUCT = (
     "WordPress before 6.0.1 allows X, and the Foo Bar plugin for WordPress 1.2 and earlier "
     "is also affected."
+)
+# 修正版が書かれている形（レビュー M5）
+DESC_FIXED_IN = "The Foo plugin for WordPress is vulnerable to X. This is fixed in 2.0.0."
+# 1 つの CVE が複数プラグインを列挙する形（レビュー M6）
+DESC_MULTI = (
+    "The A plugin for WordPress, the B plugin for WordPress and the C plugin are vulnerable "
+    "before 3.1."
 )
 
 
@@ -61,6 +69,27 @@ def test_extract_range_ignores_other_product_version() -> None:
 
 def test_extract_range_without_plugin_mention_is_none() -> None:
     assert extract_range("WordPress before 6.0.1 allows X.") == (None, None)
+
+
+def test_extract_range_fixed_in() -> None:
+    """「fixed in X」は「X 未満が影響」として扱う（レビュー M5）。"""
+    assert extract_range(DESC_FIXED_IN) == ("2.0.0", None)
+
+
+def test_parse_cves_multiple_plugins() -> None:
+    """1 つの CVE が複数プラグインを列挙していれば、すべて拾う（レビュー M6）。"""
+    advisories, reason = parse_cves(_item(DESC_MULTI, "CVE-2026-0009"))
+    assert reason == "ok"
+    assert [a.name for a in advisories] == ["A", "B", "C"]
+    assert {a.affected_below for a in advisories} == {"3.1"}
+    assert {a.id for a in advisories} == {"CVE-2026-0009"}
+
+
+def test_build_index_keeps_multiple_plugins_per_cve() -> None:
+    items = [_item(DESC_MULTI, "CVE-2026-0009")]
+    index = build_index(items)
+    assert [a.name for a in index.advisories] == ["A", "B", "C"]
+    assert summarize(items) == {"total": 1, "kept": 1, "skipped": 0, "advisories": 3}
 
 
 def test_extract_cvss_prefers_newer_standard() -> None:
@@ -121,5 +150,6 @@ def test_build_index_dedupes() -> None:
     assert stats["total"] == 4
     assert stats["kept"] == 2, "索引の件数と一致する"
     assert stats["skipped"] == 2, "重複 1 件 + 版が特定できない 1 件"
+    assert stats["advisories"] == 2
     assert stats["重複"] == 1
     assert stats["影響バージョンを特定できない"] == 1
