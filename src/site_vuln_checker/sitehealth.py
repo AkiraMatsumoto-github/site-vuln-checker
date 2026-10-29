@@ -48,8 +48,12 @@ class Component:
 
     @property
     def slug(self) -> str:
-        """WordPress.org の slug の推定値（表示名から機械的に作るだけ。API で確認する）。"""
-        return re.sub(r"[^a-z0-9]+", "-", self.name.lower()).strip("-")
+        """WordPress.org の slug の推定値。
+
+        日本語名は正規化すると空になるため、その場合は**元の名前をそのまま**使う
+        （空のコンポーネント名がレポートに出るのを防ぐ）。
+        """
+        return re.sub(r"[^a-z0-9]+", "-", self.name.lower()).strip("-") or self.name
 
     def to_dict(self) -> dict[str, object]:
         return {"name": self.name, "version": self.version, "slug": self.slug}

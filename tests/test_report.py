@@ -12,6 +12,7 @@ def _payload_with_judgement() -> dict:
             "sites_tried": 1,
             "sites_fetched": 1,
             "wordpress_rate": 1.0,
+            "advisories_applied": True,
             "levels": {"red": 1, "yellow": 0, "gray": 0, "none": 0},
         },
         "sites": [
@@ -89,3 +90,24 @@ def test_render_escapes_values() -> None:
     html_text = render(payload)
     assert "<script>alert(1)</script>" not in html_text
     assert "&lt;script&gt;" in html_text
+
+
+def test_render_warns_when_advisories_not_applied() -> None:
+    """索引を渡していないのに「赤 0」と表示しない（レビュー H2）。"""
+    payload = {
+        "summary": {"sites_tried": 1, "sites_fetched": 1},
+        "sites": [
+            {
+                "url": "https://example.com/",
+                "ok": True,
+                "status": 200,
+                "elapsed_ms": 10,
+                "analysis": {"findings": [], "notes": []},
+            }
+        ],
+    }
+    html_text = render(payload)
+    assert "脆弱性の判定はしていません" in html_text
+    assert "赤 0 は「問題なし」ではありません" in html_text
+    assert "赤（要対応）" not in html_text
+    assert "赤（未判定）" in html_text

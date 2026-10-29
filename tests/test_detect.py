@@ -96,3 +96,12 @@ def test_static_site_has_no_plugins() -> None:
     assert analysis.platforms == []
     assert analysis.of_kind("plugin") == []
     assert any("プラットフォームを判定できませんでした" in n for n in analysis.notes)
+
+
+def test_inline_only_plugin_is_unknown_not_active() -> None:
+    """本文中の文字列だけで見つけたプラグインを「有効」と断定しない（レビュー H3）。"""
+    html = "<html><body><pre>/wp-content/plugins/only-inline/lib.js</pre></body></html>"
+    analysis = analyze("https://example.com/", html, {})
+    plugin = _get(analysis, "plugin", "only-inline")
+    assert plugin.active is None
+    assert plugin.version is None

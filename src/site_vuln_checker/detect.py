@@ -217,34 +217,40 @@ def _detect_core(generator: str, resources: list[str]) -> Finding | None:
 def _detect_plugins(resources: list[str], html: str) -> list[Finding]:
     """``/wp-content/plugins/<slug>/`` からプラグインを抽出する（6.2）。
 
-    リソース URL に現れている= フロントで動いている、と推定する。
+    リソース URL に現れている = フロントで動いている、と推定し ``active=True``。
+    HTML 本文に文字列があるだけのものは**有効かどうか分からない**ので ``active=None``。
     バージョンは ``?ver=`` から取る（取れなければ ``None`` のまま）。
     """
     evidence: dict[str, list[str]] = {}
     versions: dict[str, tuple[str, float, list[str]]] = {}
+    from_resources: set[str] = set()
 
     for url in resources:
         m = _WP_PLUGIN_PATH_RE.search(url)
         if not m:
             continue
         slug = m.group(1)
+        from_resources.add(slug)
         evidence.setdefault(slug, []).append(f"asset:{_basename(url)}")
         ver = _query_version(url)
         if ver and slug not in versions:
             versions[slug] = (ver, 0.85, [f"asset:?ver={ver}"])
 
-    # インラインの URL（JSON や CSS 内）も拾う。根拠は弱いので確度を下げる。
+    # インラインの URL（JSON や CSS 内）も拾う。根拠は弱く、有効とも言えない。
     for m in _WP_PLUGIN_PATH_RE.finditer(html):
         evidence.setdefault(m.group(1), []).append("inline:path")
 
     findings: list[Finding] = []
     for slug, items in evidence.items():
         unique = tuple(dict.fromkeys(items))
+        active = True if slug in from_resources else None
         if slug in versions:
             ver, conf, extra = versions[slug]
-            findings.append(Finding("plugin", slug, ver, conf, (*unique[:1], *extra), active=True))
+            findings.append(
+                Finding("plugin", slug, ver, conf, (*unique[:1], *extra), active=active)
+            )
         else:
-            findings.append(Finding("plugin", slug, None, 0.6, unique, active=True))
+            findings.append(Finding("plugin", slug, None, 0.6, unique, active=active))
     return sorted(findings, key=lambda f: f.name)
 
 

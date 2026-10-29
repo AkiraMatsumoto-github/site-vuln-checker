@@ -23,7 +23,13 @@ MAX_BYTES = 3 * 1024 * 1024
 
 
 class FetchError(Exception):
-    """取得に失敗した（通信・ステータス・サイズ）。"""
+    """取得に失敗した（通信・ステータス・サイズ・種類）。"""
+
+
+def _is_html(content_type: str) -> bool:
+    """HTML として解析してよい Content-Type か（空は許可）。"""
+    mime = content_type.split(";")[0].strip().lower()
+    return mime in {"text/html", "application/xhtml+xml", "application/xml", "text/plain"}
 
 
 @dataclass(frozen=True)
@@ -78,7 +84,11 @@ class PoliteFetcher:
         return parser
 
     def allowed(self, url: str) -> bool:
-        """robots.txt で許可されているか。判定できないときは許可しない（安全側）。"""
+        """robots.txt で許可されているか。
+
+        robots.txt が取得できない（404・通信失敗など）場合は**許可する**。
+        取得できた場合だけ ``Disallow`` を尊重する。
+        """
         parser = self._robots_for(url)
         if parser is None:
             return True
@@ -106,6 +116,11 @@ class PoliteFetcher:
 
         if res.status_code >= 400:
             raise FetchError(f"HTTP {res.status_code}")
+
+        content_type = res.headers.get("content-type", "")
+        if content_type and not _is_html(content_type):
+            # PDF・画像・JSON を HTML として解析すると無意味な結果になる（レビュー M2）
+            raise FetchError(f"HTML ではありません（{content_type.split(';')[0]}）")
         if len(res.content) > MAX_BYTES:
             raise FetchError(f"レスポンスが大きすぎる（{len(res.content)} bytes）")
 

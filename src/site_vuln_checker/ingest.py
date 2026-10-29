@@ -60,13 +60,29 @@ def extract_name(description: str) -> str | None:
     return name or None
 
 
+def _scope(description: str) -> str:
+    """プラグイン名の位置から**後ろだけ**を返す。
+
+    NVD の説明文には別製品のバージョンが混ざる（例:
+    "WordPress before 6.0.1 allows X, and the Foo Bar plugin for WordPress 1.2 and earlier ..."）。
+    全文を対象にすると WordPress コアの 6.0.1 をプラグインの修正版として採ってしまい、
+    「ほぼ全部が影響あり」の誤検知になる。名前より前は見ない。
+    """
+    match = _NAME_RE.search(description)
+    if not match:
+        # プラグイン名が取れない説明文は対象外（名前が無ければ勧告にできない）
+        return ""
+    return description[match.start("name") :]
+
+
 def extract_range(description: str) -> tuple[str | None, str | None]:
     """``(affected_below, affected_upto)`` を返す。判断できないときは両方 None。"""
-    if match := _BEFORE_RE.search(description):
+    scope = _scope(description)
+    if match := _BEFORE_RE.search(scope):
         return match.group("v"), None
-    if match := _UPTO_INCLUDING_RE.search(description):
+    if match := _UPTO_INCLUDING_RE.search(scope):
         return None, match.group("v")
-    if match := _UPTO_BEFORE_RE.search(description):
+    if match := _UPTO_BEFORE_RE.search(scope):
         return None, match.group("v")
     return None, None
 

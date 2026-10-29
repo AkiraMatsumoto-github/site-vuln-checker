@@ -6,7 +6,7 @@ HTML 版（拡張が実際に読む形）と、コピー用テキスト版（正
 
 from pathlib import Path
 
-from site_vuln_checker.sitehealth import parse_site_health, parse_site_health_html
+from site_vuln_checker.sitehealth import Component, parse_site_health, parse_site_health_html
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -76,3 +76,10 @@ def test_empty_input_is_safe() -> None:
     assert info.core_version is None
     assert info.plugins_active == []
     assert info.to_findings() == []
+
+
+def test_component_slug_falls_back_to_name_for_japanese() -> None:
+    """日本語名は正規化すると空になるので、元の名前を slug として使う（レビュー H4）。"""
+    component = Component(name="アドバンスドカスタムフィールド", version="1.0")
+    assert component.slug == "アドバンスドカスタムフィールド"
+    assert Component(name="Contact Form 7", version="1.0").slug == "contact-form-7"

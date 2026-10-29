@@ -122,10 +122,20 @@ class NvdClient:
             finally:
                 self._last_request = time.monotonic()
 
-            if response.status_code in (403, 429):
+            if response.status_code == 403:
+                # 403 は「キーが無効・権限なし」。再試行しても直らないので即座に止める。
+                raise RuntimeError(
+                    "NVD API が 403 を返しました。API キーが無効か権限がありません"
+                    "（.env の NVD_API_KEY を確認してください）"
+                )
+            if response.status_code == 429:
                 # レート超過。待ってやり直す（キー無しだと起きやすい）。
-                last_error = f"HTTP {response.status_code}"
-                time.sleep(min(60.0, 6.0 * attempt))
+                last_error = "HTTP 429"
+                wait = 6.0 * attempt
+                retry_after = getattr(response, "headers", {}).get("retry-after", "")
+                if retry_after.isdigit():
+                    wait = max(wait, float(retry_after))
+                time.sleep(min(60.0, wait))
                 continue
             response.raise_for_status()
             return response.json()

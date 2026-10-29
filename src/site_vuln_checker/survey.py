@@ -39,6 +39,9 @@ class SiteResult:
 @dataclass
 class Survey:
     results: list[SiteResult] = field(default_factory=list)
+    #: 勧告索引を適用したか（レポートで「未判定」を明示するために使う）
+    advisories_applied: bool = False
+    advisories_count: int = 0
 
     def add(self, result: SiteResult) -> None:
         self.results.append(result)
@@ -85,6 +88,8 @@ class Survey:
             "plugin_version_rate": round(len(versioned) / len(plugins), 3) if plugins else 0.0,
             "plugins_per_site": round(len(plugins) / len(analyses), 2) if analyses else 0.0,
             "levels": self.level_counts(),
+            "advisories_applied": self.advisories_applied,
+            "advisories_count": self.advisories_count,
         }
 
     def level_counts(self) -> dict[str, int]:
@@ -149,7 +154,10 @@ def run(
     limit: int | None,
     index: AdvisoryIndex | None = None,
 ) -> Survey:
-    survey = Survey()
+    survey = Survey(
+        advisories_applied=index is not None,
+        advisories_count=len(index.advisories) if index else 0,
+    )
     targets = urls[:limit] if limit else urls
     with PoliteFetcher(delay=delay, timeout=timeout) as fetcher:
         for url in targets:
@@ -226,8 +234,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"URL がありません: {args.urls}")
         return 1
 
-    index = AdvisoryIndex.load(args.advisories) if args.advisories else None
-    if index:
+    index = None
+    if args.advisories:
+        try:
+            index = AdvisoryIndex.load(args.advisories)
+        except ValueError as exc:
+            print(str(exc))
+            return 1
         print(f"勧告索引: {args.advisories}（{len(index.advisories)} 件）")
 
     print(f"{len(urls)} 件を対象に取得します（delay={args.delay}s）")

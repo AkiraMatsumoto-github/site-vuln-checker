@@ -192,7 +192,14 @@ class AdvisoryIndex:
 
     @classmethod
     def load(cls, path: Path) -> AdvisoryIndex:
-        return cls.from_dict(json.loads(path.read_text(encoding="utf-8")), source_path=path)
+        """索引を読む。壊れているときは案内つきの ``ValueError`` にする。"""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return cls.from_dict(data, source_path=path)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"索引を読めません: {path}（JSON の形式を確認してください）"
+            ) from exc
 
     def to_dict(self) -> dict[str, object]:
         return {

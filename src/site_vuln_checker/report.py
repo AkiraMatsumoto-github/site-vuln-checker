@@ -225,6 +225,27 @@ def render(payload: dict) -> str:
     summary: dict = payload.get("summary", {})
     sites: list[dict] = payload.get("sites", [])
     levels: dict = summary.get("levels") or {}
+    applied = bool(summary.get("advisories_applied"))
+
+    if applied:
+        level_kpis = [
+            _kpi(str(levels.get("red", 0)), "赤（要対応）"),
+            _kpi(str(levels.get("yellow", 0)), "黄（更新推奨）"),
+            _kpi(str(levels.get("gray", 0)), "灰（判定不能）"),
+        ]
+        notice = ""
+    else:
+        # 索引が無いのに「赤 0」を出すと「問題なし」と誤解される（レビュー H2）
+        level_kpis = [
+            _kpi("—", "赤（未判定）"),
+            _kpi("—", "黄（未判定）"),
+            _kpi("—", "灰（未判定）"),
+        ]
+        notice = (
+            '<div class="notes"><b>脆弱性の判定はしていません</b>（勧告索引が未適用）。'
+            "<b>赤 0 は「問題なし」ではありません。</b> "
+            "<code>svc-survey --advisories &lt;index.json&gt;</code> で索引を渡してください。</div>"
+        )
 
     kpis = "".join(
         [
@@ -237,9 +258,7 @@ def render(payload: dict) -> str:
             _kpi(_percent(summary.get("php_version_rate")), "PHP 版の特定率"),
             _kpi(_percent(summary.get("plugin_version_rate")), "プラグイン版の特定率"),
             _kpi(str(summary.get("plugins_per_site", 0)), "プラグイン数/サイト"),
-            _kpi(str(levels.get("red", 0)), "赤（要対応）"),
-            _kpi(str(levels.get("yellow", 0)), "黄（更新推奨）"),
-            _kpi(str(levels.get("gray", 0)), "灰（判定不能）"),
+            *level_kpis,
         ]
     )
     cards = "".join(_site_card(site) for site in sites)
@@ -258,6 +277,7 @@ def render(payload: dict) -> str:
   公開ページに<b>すでに表示・読み込みされている情報</b>だけから推定した技術構成です（L1 パッシブ）。
   追加のリクエストはしていません。判定は<b>推定</b>であり、脆弱性の有無はまだ判定していません。
 </div>
+{notice}
 <div class="summary">{kpis}</div>
 {cards}
 <footer>

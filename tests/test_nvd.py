@@ -97,6 +97,28 @@ def test_search_without_key_sends_no_header(monkeypatch: pytest.MonkeyPatch) -> 
         client.close()
 
 
+def test_403_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """403 はキー無効。再試行せず、案内つきで失敗する（レビュー M1）。"""
+
+    class _Forbidden:
+        status_code = 403
+
+    client = nvd.NvdClient(api_key="bad", max_retries=3)
+    calls: list[int] = []
+
+    def fake_get(url: str, params: dict | None = None, headers: dict | None = None):
+        calls.append(1)
+        return _Forbidden()
+
+    monkeypatch.setattr(client._client, "get", fake_get)  # type: ignore[arg-type]
+    try:
+        with pytest.raises(RuntimeError, match="403"):
+            client.search(keywordSearch="x")
+        assert len(calls) == 1, "403 で再試行してはいけない"
+    finally:
+        client.close()
+
+
 def test_page_size_is_capped(monkeypatch: pytest.MonkeyPatch) -> None:
     client = nvd.NvdClient(api_key="secret")
     try:

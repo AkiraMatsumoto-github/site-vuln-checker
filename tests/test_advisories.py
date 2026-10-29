@@ -155,3 +155,11 @@ def test_short_slug_does_not_prefix_match() -> None:
     """短すぎる slug は前方一致させない（誤爆よけ）。"""
     index = _index()
     assert index.advisories_for(Finding("plugin", "seo", None, 0.6)) == []
+
+
+def test_load_broken_index_raises_value_error(tmp_path: Path) -> None:
+    """壊れた索引はトレースバックではなく案内つきで失敗する（レビュー M7）。"""
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ not json", encoding="utf-8")
+    with pytest.raises(ValueError, match="索引を読めません"):
+        AdvisoryIndex.load(bad)

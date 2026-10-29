@@ -25,6 +25,11 @@ DESC_UPTO_INCLUDING = (
     "Scripting in all versions up to, and including, 3.29.11 due to insufficient input sanitizing."
 )
 DESC_NO_VERSION = "The Example plugin for WordPress is vulnerable to an unknown issue."
+# 別製品（WordPress コア）のバージョンが先に出てくる形。プラグインの範囲は「1.2 以下」。
+DESC_OTHER_PRODUCT = (
+    "WordPress before 6.0.1 allows X, and the Foo Bar plugin for WordPress 1.2 and earlier "
+    "is also affected."
+)
 
 
 def test_extract_name() -> None:
@@ -47,6 +52,15 @@ def test_extract_range_upto_including() -> None:
 
 def test_extract_range_without_version() -> None:
     assert extract_range(DESC_NO_VERSION) == (None, None)
+
+
+def test_extract_range_ignores_other_product_version() -> None:
+    """別製品（WordPress コア）の `before 6.0.1` を拾わない（誤検知の源）。"""
+    assert extract_range(DESC_OTHER_PRODUCT) == (None, "1.2")
+
+
+def test_extract_range_without_plugin_mention_is_none() -> None:
+    assert extract_range("WordPress before 6.0.1 allows X.") == (None, None)
 
 
 def test_extract_cvss_prefers_newer_standard() -> None:
