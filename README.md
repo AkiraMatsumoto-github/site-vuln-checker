@@ -50,6 +50,52 @@ uv run svc-report
 
 出力は `out/` に置く（`survey.json` / `summary.json` / `report.html`）。
 
+## 設定: NVD API キー（任意）
+
+NVD の CVE API はキー無しでも使えますが、**キーがあると 10 倍速く**なります
+（キー無し 5 req/30 秒 → キーあり 50 req/30 秒）。取得は無料（メールアドレスのみ）:
+https://nvd.nist.gov/developers/request-an-api-key
+
+**置き場所は 2 か所だけ。拡張（Chrome 側）には絶対に入れません。**
+
+### 1. ローカル実行（この PC）
+
+```powershell
+# そのセッションだけ
+$env:NVD_API_KEY = "取得したキー"
+
+# 以後ずっと（新しいターミナルから有効）
+setx NVD_API_KEY "取得したキー"
+```
+
+または、リポジトリ直下に `.env` を作って書く（`.gitignore` 済み・`.env.example` をコピー）:
+
+```
+NVD_API_KEY=取得したキー
+```
+
+優先順位は **環境変数 → `.env`** です。
+
+### 2. GitHub Actions（将来の日次更新）
+
+```powershell
+gh secret set NVD_API_KEY    # 値を聞かれるので貼り付け（シェル履歴に残らない）
+gh secret list               # 登録の確認
+```
+
+Workflow からは次のように渡します。
+
+```yaml
+env:
+  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+```
+
+### 確認
+
+```powershell
+uv run python -c "from site_vuln_checker.nvd import api_key_from_env, min_interval; k=api_key_from_env(); print('キー:', 'あり' if k else 'なし', '/ 間隔:', min_interval(k), '秒')"
+```
+
 ## 判定（赤 / 黄 / 灰）
 
 `--advisories` に**勧告索引の JSON** を渡すと、検出したプラグイン・テーマと突き合わせて判定します。
