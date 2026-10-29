@@ -1,0 +1,221 @@
+"""NVD の CVE から勧告索引（``advisories.json``）を作る。
+
+NVD の本文には**修正版の書き方が 3 通り**あるので、それぞれに対応する（企画書 4.3）。
+
+- ``before 5.9.9`` … ``affected_below = 5.9.9``（5.9.9 未満が影響）
+- ``1.7 and earlier`` … ``affected_upto = 1.7``（1.7 以下が影響）
+- ``up to, and including, 3.29.11`` … ``affected_upto = 3.29.11``（X 以下が影響）
+
+版の情報が本文に無い CVE は**取り込まない**（推測しない）。KEV / EPSS は別のソースで
+後から足す（ここでは NVD だけを見る）。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from .advisories import Advisory, AdvisoryIndex
+from .nvd import NvdClient
+
+DEFAULT_OUT = Path("out") / "advisories.json"
+DEFAULT_KEYWORD = "WordPress plugin"
+
+_VERSION = r"\d+(?:\.\d+)+"
+
+#: 「The <名前> plugin (for WordPress)」から名前を取る。
+_NAME_RE = re.compile(r"\bthe\s+(?P<name>.+?)\s+(?:wordpress\s+)?plugin\b", re.IGNORECASE)
+#: before 5.9.9 / prior to 1.2.3
+_BEFORE_RE = re.compile(rf"\b(?:before|prior\s+to)\s+(?:version\s+)?(?P<v>{_VERSION})", re.I)
+#: 1.7 and earlier / 1.7 or below
+_UPTO_BEFORE_RE = re.compile(
+    rf"(?P<v>{_VERSION})\s+(?:and|or)\s+(?:earlier|below|prior)(?:\s+versions?)?", re.I
+)
+#: up to, and including, 3.29.11 / through version 1.2.3（including の後ろのカンマも許す）
+_UPTO_INCLUDING_RE = re.compile(
+    rf"\b(?:up\s+to,?\s*(?:and\s+)?including|through)\s*,?\s*(?:version\s+)?(?P<v>{_VERSION})",
+    re.I,
+)
+
+
+def english_description(cve: dict[str, Any]) -> str:
+    """CVE の英語説明を返す（無ければ空文字）。"""
+    for item in cve.get("descriptions") or []:
+        if item.get("lang") == "en":
+            return str(item.get("value") or "")
+    return ""
+
+
+def extract_name(description: str) -> str | None:
+    """「The ◯◯ plugin for WordPress」からプラグイン名を取る。"""
+    match = _NAME_RE.search(description)
+    if not match:
+        return None
+    name = re.sub(r"\s+", " ", match.group("name")).strip(" .,-")
+    return name or None
+
+
+def extract_range(description: str) -> tuple[str | None, str | None]:
+    """``(affected_below, affected_upto)`` を返す。判断できないときは両方 None。"""
+    if match := _BEFORE_RE.search(description):
+        return match.group("v"), None
+    if match := _UPTO_INCLUDING_RE.search(description):
+        return None, match.group("v")
+    if match := _UPTO_BEFORE_RE.search(description):
+        return None, match.group("v")
+    return None, None
+
+
+def extract_cvss(cve: dict[str, Any]) -> float | None:
+    """CVSS を新しい規格から順に探す。"""
+    metrics = cve.get("metrics") or {}
+    for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+        for entry in metrics.get(key) or []:
+            score = (entry.get("cvssData") or {}).get("baseScore")
+            if score is not None:
+                return float(score)
+    return None
+
+
+def nvd_url(cve_id: str, references: list[dict[str, Any]]) -> str:
+    for reference in references:
+        url = str(reference.get("url") or "")
+        if "nvd.nist.gov" in url:
+            return url
+    return f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+
+
+def parse_cve(item: dict[str, Any]) -> tuple[Advisory | None, str]:
+    """1 件の CVE を勧告に変換する。変換できないときは理由を返す。"""
+    cve = item.get("cve") or {}
+    cve_id = str(cve.get("id") or "")
+    description = english_description(cve)
+    if not cve_id or not description:
+        return None, "ID か説明が無い"
+
+    name = extract_name(description)
+    if not name:
+        return None, "プラグイン名を特定できない"
+
+    below, upto = extract_range(description)
+    if not below and not upto:
+        return None, "影響バージョンを特定できない"
+
+    advisory = Advisory(
+        id=cve_id,
+        name=name,
+        affected_below=below,
+        affected_upto=upto,
+        fixed=below,  # 「before X」の X はそのまま修正版として使える
+        cvss=extract_cvss(cve),
+        source="nvd",
+        url=nvd_url(cve_id, cve.get("references") or []),
+    )
+    return advisory, "ok"
+
+
+def build_index(
+    items: list[dict[str, Any]], *, generated_at: str | None = None
+) -> AdvisoryIndex:
+    """CVE のリストから索引を作る（ID で重複を除く）。"""
+    advisories: list[Advisory] = []
+    seen: set[str] = set()
+    for item in items:
+        advisory, _reason = parse_cve(item)
+        if advisory is None or advisory.id in seen:
+            continue
+        seen.add(advisory.id)
+        advisories.append(advisory)
+    return AdvisoryIndex(
+        advisories=advisories,
+        generated_at=generated_at or datetime.now(UTC).isoformat(timespec="seconds"),
+    )
+
+
+def summarize(items: list[dict[str, Any]]) -> dict[str, int]:
+    """取り込みの内訳（取り込めた数・理由別の除外数）。索引の件数と一致させる。"""
+    stats = {"total": len(items), "kept": 0, "skipped": 0}
+    seen: set[str] = set()
+    for item in items:
+        advisory, reason = parse_cve(item)
+        if advisory is None:
+            stats["skipped"] += 1
+            stats[reason] = stats.get(reason, 0) + 1
+            continue
+        if advisory.id in seen:
+            stats["skipped"] += 1
+            stats["重複"] = stats.get("重複", 0) + 1
+            continue
+        seen.add(advisory.id)
+        stats["kept"] += 1
+    return stats
+
+
+def save(index: AdvisoryIndex, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(index.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows のコンソール文字化け対策
+
+    parser = argparse.ArgumentParser(description="NVD から勧告索引を作る")
+    parser.add_argument("--keyword", default=DEFAULT_KEYWORD)
+    parser.add_argument("--days", type=int, default=30, help="公開日が何日前までか")
+    parser.add_argument("--limit", type=int, default=400, help="取得する CVE の上限（0=無制限）")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    args = parser.parse_args(argv)
+
+    end = datetime.now(UTC)
+    start = end - timedelta(days=args.days)
+    params = {
+        "keywordSearch": args.keyword,
+        "pubStartDate": start.strftime("%Y-%m-%dT%H:%M:%S.000"),
+        "pubEndDate": end.strftime("%Y-%m-%dT%H:%M:%S.000"),
+    }
+
+    client = NvdClient()
+    print(
+        f"NVD から取得: keyword={args.keyword!r} / {args.days} 日分 / "
+        f"キー={'あり' if client.authenticated else 'なし'}（間隔 {client.interval} 秒）"
+    )
+
+    items: list[dict[str, Any]] = []
+    try:
+        for item in client.iter_cves(page_size=200, **params):
+            items.append(item)
+            if args.limit and len(items) >= args.limit:
+                break
+            if len(items) % 200 == 0:
+                print(f"  ... {len(items)} 件取得")
+    except RuntimeError as exc:
+        print(f"取得に失敗しました: {exc}")
+        return 1
+    finally:
+        client.close()
+
+    stats = summarize(items)
+    index = build_index(items)
+    save(index, args.out)
+
+    print(f"\n取得 {stats['total']} 件 → 取り込み {stats['kept']} 件 / 除外 {stats['skipped']} 件")
+    for key, value in sorted(stats.items()):
+        if key in {"total", "kept", "skipped"}:
+            continue
+        print(f"  除外理由: {key} … {value} 件")
+    below = sum(1 for a in index.advisories if a.affected_below)
+    upto = sum(1 for a in index.advisories if a.affected_upto)
+    with_cvss = sum(1 for a in index.advisories if a.cvss is not None)
+    print(f"  affected_below {below} 件 / affected_upto {upto} 件 / CVSS あり {with_cvss} 件")
+    print(f"\n出力: {args.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -22,6 +22,7 @@
 | **P0-18** | WordPress「サイトヘルス → 情報」の DOM 解析（PHP 版数・全プラグイン・DB の取得） | `site_vuln_checker/sitehealth.py` |
 | 可視化 | 検出したプラグイン・版・確度・根拠を HTML レポートにする | `site_vuln_checker/report.py` |
 | **判定（軸A）** | 勧告索引（JSON）と突き合わせて **赤 / 黄 / 灰** を決める | `site_vuln_checker/advisories.py` |
+| **索引の生成** | NVD の CVE から「before X」「X 以下」を抽出して索引を作る | `site_vuln_checker/ingest.py` |
 
 > **JS は未検証**: この環境には Node が入っていないため、まず判定ロジックを Python で固め、
 > `tests/fixtures/` を**正解データ**として拡張（Manifest V3 / JS）へ移植する。
@@ -40,9 +41,12 @@ uv run ruff check .
 # 外部判定の実測（robots.txt を尊重し、1 サイト 1 リクエスト・既定 1 秒間隔）
 uv run svc-survey --urls sites.sample.txt --limit 5 --delay 1.0
 
-# 勧告索引を渡すと、赤 / 黄 / 灰 の判定まで行う
+# 勧告索引を NVD から作る（直近 14 日・最大 200 件。キーがあると速い）
+uv run svc-ingest --days 14 --limit 200 --out out/advisories.json
+
+# 索引を渡すと、赤 / 黄 / 灰 の判定まで行う
 uv run svc-survey --urls sites.sample.txt --limit 5 --delay 1.0 `
-  --advisories tests/fixtures/advisories.json
+  --advisories out/advisories.json
 
 # 結果を HTML に可視化する
 uv run svc-report
