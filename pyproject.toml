@@ -1,0 +1,41 @@
+[project]
+name = "site-vuln-checker"
+version = "0.1.0"
+description = "サイト脆弱性チェッカー（SVC）の PoC。外部から観測できる情報だけでサイトの技術構成を推定し、Site Health の DOM を解析する"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "AkiraMatsumoto-github", email = "95224877+AkiraMatsumoto-github@users.noreply.github.com" },
+]
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4>=4.13.4",
+    "httpx>=0.28.1",
+]
+
+[project.scripts]
+svc-survey = "site_vuln_checker.survey:main"
+svc-report = "site_vuln_checker.report:main"
+
+[build-system]
+requires = ["uv_build>=0.11.1,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+# 日本語の文章で使う全角記号を許可する
+allowed-confusables = ["（", "）", "、", "。", "「", "」", "：", "・"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]

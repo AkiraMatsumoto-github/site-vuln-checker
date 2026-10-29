@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# ツールのキャッシュ
+.pytest_cache/
+.ruff_cache/
+
+# 実行結果（生成物）。第三者のサイトのスナップショットを含むため公開しない
+out/

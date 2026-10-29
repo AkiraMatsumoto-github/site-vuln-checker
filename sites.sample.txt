@@ -1,0 +1,6 @@
+# 外部判定の実測に使うサイト一覧（1 行 1 URL、# は無視）
+# 自分が許諾を持つサイト、または公開情報の閲覧の範囲で使うこと。
+https://wordpress.org/
+https://ja.wordpress.org/
+https://www.php.net/
+https://example.com/

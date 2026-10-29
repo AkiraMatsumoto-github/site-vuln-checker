@@ -1,0 +1,36 @@
+### wp-core ###
+
+version: 6.8.2
+site_language: ja
+
+### wp-plugins-active ###
+
+name: Akismet Anti-spam
+version: 5.3.1
+status: Active
+
+name: Contact Form 7
+version: 5.9.8
+status: Active
+
+### wp-plugins-inactive ###
+
+name: Hello Dolly
+version: 1.7.2
+status: Inactive
+
+### wp-active-theme ###
+
+name: Twenty Twenty-Five
+version: 1.2
+
+### wp-server ###
+
+httpd_software: nginx/1.27.3
+php_version: 8.1.31
+php_sapi: fpm-fcgi
+
+### wp-database ###
+
+extension: mysqli
+server_version: MariaDB 10.6.18

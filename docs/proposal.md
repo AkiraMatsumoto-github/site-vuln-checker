@@ -1,0 +1,1531 @@
+# 企画書: 「サイト脆弱性チェッカー」— 脆弱性インテリジェンス基盤 ＋ Chrome拡張による「いま見ているサイト」のリスク可視化
+
+- 名称: **サイト脆弱性チェッカー**（英: Site Vulnerability Checker／短縮 SVC）
+- **内部名**: リポジトリ `site-vuln-checker` / Python パッケージ `site_vuln_checker` / CLI `svc-survey`・`svc-report`
+- **名称の制約（重要）**: 製品名・拡張名・ドメインに **「WordPress」「WP」を含めない**。WordPress Foundation の商標ポリシーで、製品名・サービス名・ドメイン名への使用は**許可制**のため（「◯◯ for WordPress」の形か、**説明文での言及**に留める）。詳細は 20.3
+- 版: **0.9（ドラフト）** ← 名称決定に合わせてディレクトリ・パッケージ・CLI 名を統一
+- 作成日: 2026-10-29（0.2〜0.9 も同日改訂）
+- 対象読者: 意思決定者、実装担当
+- 関連する既存資産
+  - 既存の MV3 拡張（非公開）… Manifest V3 + サイドパネル + `chrome.scripting` の雛形。UI と権限の扱いはこれを踏襲する
+  - `kotoba-desktop` … Python（uv / pydantic / pytest / ruff）の構成。収集バッチと評価スクリプトは同じ流儀にする
+
+---
+
+## 0. エグゼクティブサマリ
+
+- **作るもの**: ①公開されている脆弱性情報を毎日収集し、言語・パッケージ・バージョン単位で一覧化する基盤 ②Chrome 拡張で、いま開いているサイトの構成（WordPress / PHP / JS ライブラリ）を推定し、既知脆弱性と突き合わせて **赤 / 黄 / 灰 / 緑** で示す ③**誰でも無料で使える形で Chrome Web Store に公開する**。
+- **何を判定するか（v0.3 で明確化）**: **プラグインだけではない**。`PHP 8.1` のように**サポートが終了した土台のまま WordPress を最新にしているサイト**こそ更新が必要なので、**PHP / WordPress コア / プラグイン / テーマ / JS ライブラリ / Web サーバ**を個別に判定し、「既知脆弱性（軸A）」と「サポート終了・更新遅れ（軸B）」の 2 軸で評価する（7.1）。
+- **誰が使うか（v0.2 で確定）**: **不特定多数**。対象は**第三者のサイトも含む**（自社サイトに限定しない）。MVP の対象は **PHP/Composer ＋ WordPress ＋ JS ライブラリ**。
+- **なぜ今か**: PHP 8.2 のセキュリティサポートが **2026-12-31 で終了**（本日時点で残り約 2 か月）、8.1 以前はすでに EOL。EOL のまま公開されているサイトは珍しくない。一方で「そのサイトが何のプラグインを、どのバージョンで動かしているか」は外からは見えにくい。
+- **データ（v0.2 で確定）**: **WPScan / Patchstack は使わない**。規約が「データの永続保存・キャッシュの禁止」「自社サービスへの組込みは Enterprise 契約必須」としており、**不特定多数への無料提供では BYOK でも利用できない**（＝拡張自体が「サービスへの組込み」に当たる）ため。代わりに **NVD ＋ GitHub Advisory Database / OSV（CC-BY-4.0）＋ JVN iPedia ＋ CISA KEV ＋ EPSS ＋ WordPress.org Plugin API** で組み立てる。**予算 0 円で成立する。**
+- **どう解くか**: 検出は **パッシブ方式を中心**（相手サイトに負荷をかけず、能動スキャンはしない）。WordPress プラグインの修正版は、**CVE 本文の「◯◯ plugin before 1.2.3」を解析**し、`WordPress.org Plugin API` で slug↔表示名を突き合わせて抽出する（4.2 参照）。
+- **規模と期間**: PoC 2 週間 → MVP 6 週間 → Chrome Web Store 公開（v1）8 週間。1〜2 名。
+- **最大のリスク（v0.2 で拡大）**: ①誤検知で**第三者のサイトを「危険」と表示する**こと（信用毀損・営業妨害の論点）。②未検出（管理画面専用プラグイン、SaaS）。③無料・少人数運営の持続性。→ 表現は「推定」「可能性」に統一し、根拠・判定時刻・データ日付を必ず併記、**サイト所有者からの異議申立て窓口**を用意し、**「緑＝安全」とは表現しない**。
+
+---
+
+## 1. 背景
+
+### 1.1 何が起きているか
+
+- PHP 本体の脆弱性は継続して公開されている（例: 2024 年の CGI 引数インジェクション CVE-2024-4577）。PHP は **サポート終了と同時に修正が提供されなくなる**ため、EOL 版の利用はそれ自体が恒久的なリスクになる。
+- PHP 公式のサポート状況（2026-10-29 時点で php.net を確認）:
+
+  | ブランチ | アクティブサポート | セキュリティサポート | 本日時点 |
+  | --- | --- | --- | --- |
+  | 8.5 | 2027-12-31 | 2029-12-31 | 現行 |
+  | 8.4 | **2026-12-31** | 2028-12-31 | 残り 2 か月でセキュリティのみ |
+  | 8.3 | 2025-12-31 | 2027-12-31 | セキュリティのみ |
+  | 8.2 | 2024-12-31 | **2026-12-31** | 残り 2 か月で EOL |
+  | 8.1 以前 | — | 終了 | EOL |
+
+- WordPress は本体・プラグイン・テーマを合わせて年間を通じて多数の脆弱性が公開され、CISA KEV にも PHP Group・WordPress 関連製品が掲載されている（KEV カタログの Vendor 一覧に `PHP Group` が含まれることを確認済み）。
+- 一方で、**優先順位付けの材料はすでに公開されている**。
+  - CISA KEV … 実際に悪用が観測された脆弱性のカタログ（日次更新、JSON/CSV 配布）
+  - EPSS … 「公開済み CVE が 30 日以内に悪用される確率」を 0〜1 で毎日公開（FIRST、CSV/API）
+  - OSV … OSS パッケージのバージョン範囲付きアドバイザリ（レート制限なし、`Packagist` など PHP/Composer を含む）
+- それでも現場では「CVSS の点数が高い順」に並べるだけになり、**KEV 該当かつ EOL のもの**が後回しになる、という優先順位の逆転が起きやすい。
+
+### 1.2 課題
+
+| # | 課題 | 現状 | 本企画での扱い |
+| --- | --- | --- | --- |
+| P1 | 情報が分散している | NVD・JVN・GitHub Advisory・各 CMS ベンダの DB を別々に見ている | 単一スキーマに正規化して 1 画面に集約 |
+| P2 | 「自社の何が該当するか」が分からない | 目視・担当者の記憶に依存 | マニフェスト（composer.lock 等）取り込みで機械的に突合 |
+| P3 | 「目の前のサイトがまずいか」が分からない | 専門家が手作業で調べる | 拡張で構成を推定し、根拠つきで即時表示 |
+| P4 | 優先順位がつかない | CVSS の点数だけで判断 | CVSS × EPSS × KEV × EOL × 確度 で合成スコア |
+| P5 | 説明できない | 英語のアドバイザリ原文のみ | 日本語要約・影響・修正版・参照リンクを併記 |
+| P6 | 判定の限界を伝えていない | 「問題なし」と言い切ってしまう | 確度と「判定不能（灰）」を明示、免責を常時表示 |
+
+---
+
+## 2. 目的とゴール
+
+### 2.1 ゴール（達成したい状態）
+
+- **G1（一覧化）**: 脆弱性情報を毎日取り込み、「エコシステム / パッケージ / 影響バージョン / 修正版 / CVSS / EPSS / KEV / EOL」で検索・絞り込みできる一覧を持つ。
+- **G2（資産への紐付け）**: 手元の `composer.lock` / `package-lock.json` などを取り込むと、該当する脆弱性が「自分のどのプロジェクトのどのパッケージか」で並ぶ。
+- **G3（サイトの可視化）**: Chrome 拡張で、閲覧中サイトの**構成コンポーネント（PHP / WordPress コア / プラグイン / テーマ / JS ライブラリ / サーバ）**を推定し、**「既知脆弱性」と「サポート終了（EOL）」の両面**から赤/黄/灰/緑で示す。
+- **G4（意思決定の支援）**: 各指摘に「なぜ危険か（悪用実績・予測確率・必要条件）」「どう直すか（修正版・無効化・ベンダ問い合わせ）」を添える。
+- **G5（誠実さ）**: 判定の根拠・時刻・確度を常に併記し、「保証しない」ことを UI 上で明言する。
+
+### 2.2 非ゴール（やらないこと）
+
+- **能動スキャン / 侵入テスト**: ポートスキャン、ディレクトリ総当たり、exploit の送信、認証突破の試行は行わない。理由は (a) 相手サイトへの負荷、(b) 不正アクセス禁止法・各サイトの利用規約との抵触リスク、(c) Chrome Web Store のポリシー。
+- **攻撃コードの配布・PoC の実行**。
+- **修正の自動適用**（自動更新、WAF の操作）。
+- **不特定サイトの一括スキャン**（クロール）。必要になった場合は「自分の管理下のドメインのみ」を条件にした別フェーズとする。
+- **Shopify アプリ／サーバ側の脆弱性判定**: SaaS のため外部からは不可視（後述の限界を参照）。
+
+### 2.3 KPI（MVP 時点の目標値）
+
+| 指標 | 目標 | 測り方 |
+| --- | --- | --- |
+| 技術スタック判定の適合率 | 90% 以上 | WordPress 20 サイト＋静的サイト 10 サイトの人手正解との一致（Shopify は v1 以降） |
+| バージョン特定率（WordPress プラグイン） | 60% 以上 | 検出したプラグインのうち、何らかのシグナルでバージョンまで特定できた割合 |
+| 修正版の特定率（プラグイン） | 50% 以上 | 該当 CVE のうち「before X.Y.Z」の解析で修正版が取れた割合（新方式の生命線） |
+| **PHP 修正版マッピング率** | 80% 以上 | PHP の CVE のうち「ブランチ別の修正版」を特定できた割合（php.net チェンジログ等・P0-19） |
+| **「直し方」分類の正しさ** | 誤り 0 件 | パッチ／ブランチ移行／メジャーの分類 20 件を人手で確認 |
+| **WordPress コア版数の特定率** | 95% 以上 | 20 サイト中、コア版数まで特定できた割合（`meta generator` / `?ver=`） |
+| **PHP 版数の特定率（外部）** | 30% 以上（実測して確定） | WordPress サイト 30 件のうち `X-Powered-By` 等で判明した割合（P0-15） |
+| **Site Health モードの取得成功率** | 95% 以上 | 自サイト 5 件で PHP・DB・全プラグインを取得できた割合（6.4） |
+| **EOL 指摘の正しさ** | 誤り 0 件 | EOL 判定 20 件を人手で確認（日付・ブランチの取り違えがないか） |
+| **「更新すべき」を 1 件以上出せたサイトの割合** | 60% 以上 | 50 サイトの実測（P0-21）。低すぎると「使えない」と判断される |
+| 誤検知率（赤判定） | 5% 未満 | 赤判定のうち人手で否定されたものの割合 |
+| **異議申立てへの初回応答** | 3 営業日以内 | サイト所有者からの訂正依頼への応答（公開サービスの必須要件） |
+| 判定所要時間 | 体感 2 秒以内 | サイドパネル表示までの時間（キャッシュヒット時 0.3 秒以内） |
+| データ鮮度 | 24 時間以内 | 各ソースの最終取り込み時刻を画面に表示 |
+| 一覧の応答 | 10 万行の絞り込みで 1 秒以内 | 実測（p95） |
+
+---
+
+## 3. スコープ
+
+### 3.1 対象（In）
+
+| 区分 | 内容 |
+| --- | --- |
+| データ収集 | NVD（CVE/CVSS/CPE）、OSV（PHP/Composer・npm・PyPI・RubyGems 等）、CISA KEV、EPSS、JVN iPedia（日本語・国内製品）、endoflife.date（EOL 情報） |
+| 一覧画面 | 検索・絞り込み・並べ替え・詳細・CSV/JSON エクスポート・鮮度表示 |
+| 資産棚卸し | `composer.lock` / `package-lock.json` / `requirements.txt` / `Gemfile.lock` / `go.mod` の取り込み → 該当脆弱性の突合、CycloneDX 形式での出力 |
+| Chrome 拡張 | コンポーネント検出、バージョン推定、既知脆弱性の照合、**EOL 判定**、サイドパネル表示、バッジ表示 |
+| **検査対象コンポーネント（MVP）** | **PHP / WordPress コア / プラグイン / テーマ / JS ライブラリ**（＋取得できれば Web サーバ）。**プラグインだけを対象にしない**（7.2）。自サイトなら Site Health から PHP・DB・全プラグインを取得（6.4） |
+| 拡張の対応プラットフォーム（MVP） | WordPress（コア／プラグイン／テーマ）、PHP、jQuery ほか主要 JS ライブラリ（v0.2 で確定：**この 3 つに絞る**） |
+| 拡張の対応プラットフォーム（v1 以降） | Shopify（判別＋読み込み JS ライブラリ）、Drupal、Joomla、Laravel/Symfony（`Set-Cookie`・エラーページ等の限定的シグナル）、Next.js/Nuxt などのフロントエンド |
+
+### 3.2 対象外（Out）
+
+- 能動スキャン（前述）
+- **第三者のサイトの認証後領域**の情報取得（他人の管理画面は見ない）。**例外**: 自分が管理者としてログインしているサイトの「サイトヘルス → 情報」を読む機能は v1 で実装する（6.4）
+- Shopify アプリの脆弱性、Shopify サーバ側のバージョン
+- ゼロデイ（未公開）脆弱性の推測
+- 修正の自動適用
+
+---
+
+## 4. データソースと制約（ここが設計の分岐点）
+
+| ソース | 提供内容 | 取得方法 | 制約・注意（重要） |
+| --- | --- | --- | --- |
+| **NVD (CVE)** | CVE、CVSS v2/v3.1/v4.0、CPE、CWE、参照 | REST API 2.0（`services.nvd.nist.gov/rest/json/cves/2.0`）、パラメータ `cveId` / `cpeName` / `virtualMatchString` / `pubStartDate` / `lastModStartDate` | レート制限あり（API キー無しで 5 リクエスト/30 秒、キー有りで 50/30 秒が一般に知られている値。**PoC で実測して確定**）。`resultsPerPage` の上限と、期間指定の最大幅にも上限がある |
+| **OSV** | GHSA・PyPI・Go・Rust・**Packagist（Composer/PHP）** 等のバージョン範囲つきアドバイザリ | REST `POST /v1/query`、`POST /v1/querybatch`、`GET /v1/vulns/{id}`。加えて GCS の全件ダンプ `https://storage.googleapis.com/osv-vulnerabilities/all.zip`、エコシステム別 `.../<ECOSYSTEM>/all.zip`、差分用 `modified_id.csv` | API はレート制限なし（HTTP/1.1 でレスポンス 32MiB 上限）。**全件は API ではなくダンプ＋差分 CSV で同期するのが正解** |
+| **CISA KEV** | 悪用が観測された脆弱性、追加日、対応期限、ランサムウェア関連フラグ | JSON / CSV フィード（`known_exploited_vulnerabilities.json`）を日次取得 | 米国公的機関のカタログ。日本法人でも「悪用実績」の指標として有用。件数は数千規模 |
+| **EPSS** | CVE ごとの悪用確率（0〜1）とパーセンタイル | API（`api.first.org/data/v1/epss`）、日次 CSV 一括、履歴 | 日次更新。スコアのみで「危険」と断定しない（後述のスコア式で重み付け） |
+| **JVN iPedia / MyJVN** | 日本語の脆弱性情報、国内製品、CVSS、対策 | MyJVN API（`getVulnOverviewList` 等）、HND 形式の一括データ | 日本語要約の主ソース。**クレジット表記などの利用条件を確認**（本日時点で API 仕様ページが 503 のため、PoC 時に再確認） |
+| **endoflife.date** | PHP・WordPress・Laravel・Node 等の EOL／サポート終了日 | JSON API（`/api/php.json` 等） | EOL 判定の基礎データ。**API 仕様は PoC で確認**。取得できない場合は自前の EOL テーブルにフォールバック |
+| ~~WPScan API~~ | WordPress コア／プラグイン／テーマの脆弱性、`fixed_in`、CVE | — | **v0.2 で不採用**。規約に「データの永続保存の禁止」「API データのキャッシュ禁止」「スクレイピング禁止」「**自社サービスへの組込みは Enterprise 契約必須**」と明記。不特定多数への無料提供では **BYOK でも「サービスへの組込み」に当たる**ため利用不可 |
+| ~~Patchstack~~ | WordPress 特化（有償） | — | **v0.2 で不採用**。予算 0 円の方針に合わない。運営形態が変わった場合の再検討候補 |
+| ~~Wordfence Intelligence~~ | WordPress 脆弱性フィード | — | **v0.2 で不採用**。本日時点で公開エンドポイントが 410／403 を返し、**再配布可否を確認できなかった**ため（確認できれば復活の余地あり） |
+| **GitHub Advisory Database**（OSV 経由で取得） | WordPress プラグインを含む OSS の勧告。**Composer のレビュー済み勧告 6,592 件**、未レビューの CVE 取り込みも多数あることを確認 | OSV の GCS ダンプ／API（GHSA 由来） | **CC-BY-4.0 → 出典表示すれば再配布・無料提供が可能**。WordPress プラグインの勧告は「The ◯◯ WordPress plugin before 1.2.3 ...」形式（未レビューが多く、パッケージ情報は無い） |
+| **WordPress.org Plugin API** | slug → 表示名、最新版、最終更新日、有効インストール数 | `api.wordpress.org/plugins/info/1.2/?action=plugin_information&request[slug]=...` | 公式・無償。**サイトから取れる slug と、CVE 本文の表示名（◯◯ plugin）を結ぶ辞書**として使う（4.3） |
+| **PHP（リリース情報）** | PHP 本体の各ブランチのパッチ版、リリース日、**その版で修正された CVE／バグ** | php.net のリリースページ・チェンジログ（`/releases/`、`ChangeLog-8.php`）、`php/php-src` の GitHub アドバイザリ、NVD の CPE（`cpe:2.3:a:php:php:*`） | 無償。**「どの CVE が、どの版で直ったか」を版ごとに持つ**のが要点（7.4）。チェンジログの HTML 解析は形式変更に弱いので、**PoC で取得方法を確定**（P0-19） |
+| **NVD の CPE（`target_sw = wordpress`）** | プラグイン製品の CPE（例 `cpe:2.3:a:contact-form-7:*:*:*:*:wordpress:*:*`） | `virtualMatchString` による部分一致検索 | 無償・パブリックドメイン。product 名と slug の一致率は**要検証（P0-13）**。一致すればプラグイン単位で CVE を引ける |
+| **retire.js のシグネチャ DB** | 脆弱な JS ライブラリのバージョン判定パターン | GitHub リポジトリ（**Apache-2.0**） | ライセンスが明確なので、JS ライブラリ検出のシグネチャとして流用可能。拡張の参考実装でもある |
+
+### 4.1 この表から導かれる設計方針
+
+1. **保存・配布できるデータだけで作る。** WPScan / Patchstack は「不特定多数への無料提供」と両立しないため v0.2 で完全に外した（BYOK も不可）。
+2. **WordPress プラグインの修正版は CVE 本文から抽出する。** 「The ◯◯ WordPress plugin before 1.2.3 ...」の `before` を正規表現で取り、slug↔表示名の辞書（WordPress.org Plugin API）と突き合わせる。精度は WPScan に劣るが、**無償・再配布可能**という制約下で成立する唯一の方法（4.3）。
+3. **全件同期は API ではなくダンプ＋差分**（OSV の GCS、NVD の期間指定、EPSS の CSV）。API は「照会」に使う。
+4. **EOL 情報を一級市民として扱う**。脆弱性が 1 件も無くても「EOL だから要確認」という判定が出せるようにする。
+5. **ライセンス表示を製品の一部にする。** CC-BY-4.0（GitHub Advisory Database）などは出典表示が条件。**ライセンス画面を v1 の必須機能**にする（4.2）。
+
+### 4.2 データライセンスと出典表示（無料公開の必須要件）
+
+不特定多数に無料配布する以上、**「どのデータを、どの条件で再配布しているか」を明示する義務**が生じる。v0.2 の構成は下表のとおり。
+
+| ソース | ライセンス／条件 | 再配布 | 必要な対応 |
+| --- | --- | --- | --- |
+| NVD (CVE/CVSS/CPE) | 米国政府の著作物（事実上パブリックドメイン） | ○ | 出典明記（推奨） |
+| GitHub Advisory Database（GHSA） | **CC-BY-4.0** | ○ | **出典表示が必須**（「データ提供: GitHub Advisory Database (CC-BY-4.0)」） |
+| OSV のその他ソース | 各 DB ごと（CC-BY-4.0 / CC0 / MIT / Apache-2.0 など） | ○ | ソース別のクレジット一覧を画面に出す |
+| CISA KEV | 米国政府（公開） | ○ | 出典明記 |
+| EPSS (FIRST) | 公開データ（無償） | ○ | 出典明記 |
+| JVN iPedia / MyJVN | 公開（**利用条件・クレジット表記あり**） | △ 要確認 | クレジット表記。本日 API 仕様ページが 503 のため**公開前に再確認** |
+| endoflife.date | MIT（プロジェクト）※要確認 | ○ | 出典明記 |
+| WordPress.org Plugin API | 公開データ | △ | 出典明記・アクセス頻度への配慮（キャッシュ前提） |
+| retire.js のシグネチャ | **Apache-2.0** | ○ | `NOTICE` を保持し、ライセンス画面に記載 |
+| ~~WPScan / Patchstack~~ | 不採用 | × | — |
+
+- **ライセンス画面**（拡張の設定＋ダッシュボードのフッター）に、上表をそのまま掲載する。
+- 「データは各提供元のものであり、本サービスはそれを再配布している」旨と、各ソースのリンクを置く。
+
+### 4.3 WordPress プラグインの修正版をどう取るか（新方式の中核）
+
+```
+入力: slug（サイトの /wp-content/plugins/<slug>/ から抽出）
+1. name = WordPress.org Plugin API(slug).name        # 例: "Contact Form 7"
+2. cand = NVD を本文検索（name を含み "WordPress plugin" を含む CVE）
+3. for cve in cand:
+       m = /before\s+(\d+(?:\.\d+)+)/ を本文に適用
+       if m: fixed = m[1]                          # 「before 5.9.9」→ 5.9.9
+4. detected_version < fixed → 該当（確度 0.6〜0.8）
+5. 名前の一致が弱い（一般名詞・部分一致）→ 灰（判定不能）
+```
+
+- **誤マッチ対策**: 表示名が一般名詞（"Contact Form" など）だと誤爆するため、`slug` のトークンと `name` の一致率で足切りし、弱ければ灰に落とす。
+- **CPE との併用**: NVD の `virtualMatchString` で `cpe:2.3:a:*:<slug>:*:*:*:*:wordpress:*:*` を引ければ、本文解析より確実。**一致率は P0-13 で実測**し、良ければ優先する。
+- **「before X」が無い場合**: 修正版不明として「修正版不明（要確認）」と表示する。ここを推測で埋めない。
+
+---
+
+## 5. 機能要件
+
+### 5.1 機能一覧
+
+| ID | 機能 | 内容 | 優先 |
+| --- | --- | --- | --- |
+| F1 | 収集・正規化 | 各ソースを取得し、1 つのスキーマ（`vuln` / `affected`）に変換。ソース・ID・取得時刻・原本ハッシュを保持 | MVP |
+| F2 | 一覧・検索 | エコシステム、パッケージ名、CVE、CVSS、EPSS、KEV、EOL、公開日、修正版有無で絞り込み。全文検索 | MVP |
+| F3 | 詳細表示 | 日本語要約、影響、攻撃条件（認証要否・経路）、修正版、参照リンク、CVSS ベクタ、EPSS 推移、KEV 期限 | MVP |
+| F4 | 資産棚卸し | マニフェスト取り込み → 該当脆弱性の突合、CycloneDX 出力 | MVP |
+| F5 | コンポーネント検出（拡張） | 閲覧中ページから **PHP / WordPress コア / プラグイン / テーマ / JS ライブラリ / Web サーバ** を推定（プラグイン単体ではない） | MVP |
+| F6 | バージョン照合 | 推定バージョン × 影響範囲で該当脆弱性を抽出 | MVP |
+| F7 | リスク表示 | 赤/黄/灰/緑 + スコア + 確度 + 根拠（どのシグナルで判定したか） | MVP |
+| F8 | **EOL／更新遅れ判定** | PHP・WordPress コア・JS ライブラリ・DB・サーバのサポート終了を判定し、**単独でも黄以上**で警告（7.3） | MVP |
+| F15 | **「直し方」の提示** | 修正版から **パッチ更新（同一ブランチ）／ブランチ移行／メジャー更新／削除／ベンダ確認** を判定し、「何をすればいいか」を出す（7.4） | MVP |
+| F9 | セキュリティヘッダ診断 | CSP / HSTS / X-Frame-Options / Referrer-Policy / `X-Content-Type-Options` の有無（「構成不備」として脆弱性とは別枠） | v1 |
+| F10 | 履歴・変化検知 | 同一 URL の前回判定との差分（「先週は無かった CVE が増えた」） | v1 |
+| F11 | 通知 | Slack / メールで日次サマリと新規 KEV 該当 | v1 |
+| F12 | レポート | サイト単位・プロジェクト単位の PDF/HTML レポート | v2 |
+| F13 | 誤検知フィードバック | 「これは違う」を送るとシグネチャ改善に回る | v1 |
+| F14 | **Site Health 読み取り（自サイト）** | ログイン中の WordPress の「サイトヘルス → 情報」から PHP・DB・サーバ・全プラグイン（無効化中含む）の版数を取得（6.4） | v1 |
+
+### 5.2 ユーザーシナリオ
+
+**S1: 開発者として自社の PHP プロジェクトを棚卸しする**
+`composer.lock` をアップロード → 「CVE-20xx-xxxx が 3 件、うち KEV 該当 1 件、修正版は x.y.z」が並ぶ → 更新チケットを作る。
+
+**S2: 営業・情シスとして、取引先候補のサイトを確認する**
+サイトを開いて拡張のアイコンをクリック → 「WordPress 6.x / プラグイン A（v1.2.3・確度 高）/ PHP 8.1（EOL）/ 該当 CVE 2 件（うち KEV 1 件）」→ 「要確認」→ 共有できるテキストをコピー。
+
+**S3: 運用担当として、自社サイトの改修前後を比べる**
+改修前に判定 → 改修後に判定 → 「プラグイン B の CVE が消えた／C が増えた」を確認。
+
+**S4: 判断に迷うケース**
+バージョンが取れずプラグインの存在だけ分かった → **灰（判定不能）**と表示し、「このプラグインには過去に N 件の脆弱性が報告されています。バージョンを確認してください」と次に取る行動を示す（緑にしない）。
+
+---
+
+## 6. 技術スタック検出の設計（拡張の中核）
+
+### 6.1 3 層モデル（勝手に相手サイトを叩かない）
+
+| 層 | 手法 | 追加リクエスト | 使う情報 | 用途 |
+| --- | --- | --- | --- | --- |
+| **L1 パッシブ** | すでに読み込まれた HTML/DOM/リソース URL を解析 | なし | `document`、`performance.getEntriesByType('resource')`、`<meta generator>`、`?ver=`、アセットパス | 常時実行。最も安全で高速 |
+| **L2 限定取得** | 既知パスを少数だけ取得（`/wp-json/`、`/readme.html`、`/wp-content/plugins/<slug>/readme.txt`） | 数件（同一オリジン） | レスポンス本文 | ユーザーが「詳しく調べる」を押したとき、または自社ドメイン登録時のみ |
+| **L3 明示同意** | ヘッダの取得、`robots.txt` の尊重、レート制限つきの追加取得 | 数件 | `Server`、`X-Powered-By`、`Set-Cookie`、`Link` | 設定で「詳細モード」を ON にした場合のみ |
+
+- L2/L3 は **同一オリジンへの GET のみ**、1 サイトあたり最大 5 リクエスト／セッション、間隔 500ms 以上、`robots.txt` の `Disallow` に従う。POST・認証・パラメータ付き URL は一切送らない。
+- この制約は「相手サイトへの配慮」だけでなく、**拡張の審査と法的リスクを下げる**ためにコード上で強制する（実装でリクエスト数をカウントし、超えたら止める）。
+
+### 6.2 シグナル表（MVP で実装するもの）
+
+**プラットフォーム判定**
+
+| 対象 | シグナル | 確度 |
+| --- | --- | --- |
+| WordPress | `<meta name="generator" content="WordPress 6.8.2">` | 高 |
+| WordPress | `<link rel="https://api.w.org/" href=".../wp-json/">`、`/wp-json/` への参照 | 高 |
+| WordPress | アセットに `/wp-content/` または `/wp-includes/` を含む | 高 |
+| WordPress | レスポンスヘッダ `Link: <https://example.com/wp-json/>; rel="https://api.w.org/"` | 高 |
+| WordPress | `Set-Cookie` に `wordpress_`, `wp-settings-`, `wordpress_logged_in_` | 高（要ヘッダ取得＝L3） |
+| WordPress | `/feed/` の `<generator>https://wordpress.org/?v=6.8.2</generator>`（L2） | 高 |
+| Shopify | `cdn.shopify.com`、`Shopify.theme`、`window.Shopify`、`shopify-section` クラス、`X-ShopId`/`X-Shopify-Stage` ヘッダ | 高 |
+| Drupal | `<meta name="Generator" content="Drupal 10 ...">`、`/sites/default/files/`、`X-Generator: Drupal` | 高 |
+| Joomla | `<meta name="generator" content="Joomla!">`、`/media/system/js/`、`/components/com_` | 高 |
+| Laravel | `Set-Cookie: laravel_session`、`XSRF-TOKEN`、エラーページの `Whoops` | 中 |
+| Next.js | `__NEXT_DATA__`、`/_next/static/` | 高 |
+| PHP（一般） | `X-Powered-By: PHP/8.1.2`、`PHPSESSID` | 中（`X-Powered-By` は消されることが多い） |
+| サーバ | `Server: nginx/1.24.0`、`Apache/2.4.58 (Ubuntu)` | 高（バージョンは隠蔽されることも） |
+
+**バージョン推定（優先順に採用）**
+
+| # | シグナル | 例 | 確度の重み |
+| --- | --- | --- | --- |
+| V1 | `<meta name="generator">` のバージョン | `WordPress 6.8.2` | 1.00 |
+| V2 | アセット URL のクエリ `?ver=` | `/wp-includes/js/wp-emoji-release.min.js?ver=6.8.2` | 0.85（コアは信頼できる／プラグインは改変されうる） |
+| V3 | アセットのファイル名に埋め込まれた版 | `jquery-3.7.1.min.js`、`bootstrap.min.css?v=5.3.3` | 0.90 |
+| V4 | `readme.txt` の `Stable tag:`（L2） | `Stable tag: 5.9.8` | 0.80（**同梱ファイルなので稼働版と一致しやすい**。ただし商用プラグインは同梱せず、直接アクセスを塞ぐ構成もある） |
+| V5 | プラグイン本体 JS の `?ver=` | `/wp-content/plugins/contact-form-7/includes/js/index.js?ver=5.9.8` | 0.85 |
+| V6 | 既知ファイルの SHA-256 照合（将来） | 静的ファイルのハッシュで版を特定 | 0.95 |
+
+> **重要**: `?ver=` はテーマや設定で書き換えられることがある。**複数シグナルが一致したら確度を上げ、単独なら「推定」と明示する**。UI では必ず「推定バージョン」と表記し、断定しない。
+
+**WordPress プラグインの抽出**
+
+```
+/wp-content/plugins/<slug>/...           → slug を列挙（フロントに出力されている＝有効化されている可能性が高い）
+/wp-content/themes/<slug>/...            → テーマ
+/wp-content/uploads/...                  → 除外（ノイズ）
+```
+
+- 「アセットが HTML に出ている」＝**フロントで動作している**と推定できる。管理画面専用のプラグイン（セキュリティ系、バックアップ系など）は**検出できない**。これは拡張の構造的な限界であり、UI に明記する。
+- 同一 slug でも**サイトごとにバージョンが違う**ため、slug だけでは脆弱性を断定できない。→ 灰判定の根拠になる。
+
+**JS ライブラリ**
+
+- retire.js のシグネチャ（Apache-2.0）を利用し、`performance` のリソース URL とファイル名からライブラリ・版を推定。jQuery / Bootstrap / AngularJS / lodash / moment など、**EOL かつ既知脆弱性があるものが今も多数残っている**ため費用対効果が高い。
+- 照合先は OSV の `npm` エコシステム。
+
+**Shopify の扱い（期待値の調整が必要）**
+
+| できること | できないこと |
+| --- | --- |
+| Shopify で作られていることの判定 | サーバ側のバージョン（SaaS なので存在しない） |
+| テーマ名・テーマ ID の推定（`Shopify.theme`） | テーマの脆弱性（公開 DB が無い） |
+| 読み込まれている JS ライブラリの脆弱性（retire.js 経由） | インストール済み **アプリ**の脆弱性・バージョン |
+| 外部スクリプトのドメイン一覧（どのアプリが埋め込まれているかの推定） | アプリの設定不備 |
+
+→ Shopify については「**読み込まれているフロント資産の脆弱性**」と「**廃止されたライブラリの検出**」に価値を絞る。これは当初想定（プラグインのバージョン）とは別物なので、**期待値の合意が必要**（不明点 Q6）。**v0.2 で v1 以降に移動した**（MVP は WordPress / PHP / JS ライブラリ）。
+
+### 6.3 検出結果のデータ構造（拡張が返すもの）
+
+```json
+{
+  "url": "https://example.com/",
+  "scannedAt": "2026-10-29T12:34:56Z",
+  "platforms": [
+    {"name": "wordpress", "version": "6.8.2", "confidence": 1.0,
+     "evidence": ["meta:generator", "path:/wp-includes/"]}
+  ],
+  "components": [
+    {"type": "plugin", "slug": "contact-form-7", "version": "5.9.8",
+     "confidence": 0.85, "evidence": ["asset:?ver=5.9.8"], "active": true},
+    {"type": "library", "name": "jquery", "version": "3.7.1",
+     "confidence": 0.9, "evidence": ["filename:jquery-3.7.1.min.js"]}
+  ],
+  "server": [{"product": "php", "version": "8.2.29", "confidence": 0.6,
+              "evidence": ["header:x-powered-by"]}],
+  "findings": [
+    {"component": "contact-form-7@5.9.8", "vulnId": "CVE-2025-XXXX",
+     "severity": "critical", "cvss": 9.8, "epss": 0.42, "kev": false,
+     "fixedIn": "5.9.9", "source": "nvd", "confidence": 0.85}
+  ],
+  "verdict": {"level": "red", "score": 88},
+  "limits": ["管理画面専用プラグインは検出対象外です"]
+}
+```
+
+---
+
+### 6.4 自サイト向け：Site Health 読み取りモード（PHP バージョンの決定打）
+
+外部から PHP のバージョンが分からない問題を、**サイト所有者本人のログイン済みセッション**で解決する。
+
+- WordPress の「ツール → サイトヘルス → 情報」タブ（`/wp-admin/site-health.php?tab=debug`）には次の情報が表示される（WordPress 公式ドキュメントで確認済み）。
+  - WordPress（コアのバージョン）
+  - 有効なテーマ／無効なテーマ
+  - **有効なプラグイン／無効なプラグイン（それぞれバージョン付き）**
+  - サーバ（**PHP のバージョン**、Web サーバ、PHP SAPI など）
+  - データベース（MySQL / MariaDB のバージョン）
+- これを**同じタブで読むだけ**（追加リクエストなし・端末外へ送らない）で、次の精度向上が得られる。
+
+  | 得られるもの | 効果 |
+  | --- | --- |
+  | **PHP のバージョン** | EOL 判定が**確定**する（例: 8.1 → 更新必須） |
+  | **無効化中のプラグインも含む全プラグイン** | フロントでは見えないプラグインまで棚卸しできる |
+  | DB・Web サーバのバージョン | 軸B（EOL）の判定対象が増える |
+
+- 実装: `activeTab` でタブを読み、URL が `/wp-admin/site-health.php` かつ `tab=debug` のときだけ抽出する。**画面に表示されている情報を読むだけで、認証を突破しない**。
+- UI 上の位置づけ: 「**あなたが管理者なら、より正確に調べられます** → サイトヘルスを開く」という導線。公開サイトの推定とは別枠（**自分のサイトの診断**）として提示する。
+- CWS の単一目的との関係: 「*自分が管理する WordPress サイト*の診断」は自然な拡張。ただし説明文に明記する（20 章）。
+- 注意: 読み取った内容は**端末内のみ**で処理し、サーバへ送らない。
+
+#### 何を取り出すか（フィールド対応表）
+
+「情報」タブは、**セクション見出し**（例: `wp-core`、`wp-plugins-active`、`wp-server`、`wp-database`）と**「項目名 / 値」の 2 列**で構成される。取り出すのは以下に限定する。
+
+| セクション | 項目（例） | 使い道 |
+| --- | --- | --- |
+| `wp-core` | `version`（6.8.2） | 軸A・軸B |
+| `wp-plugins-active` | `<プラグイン名>: 5.9.8` | 軸A・軸B（**有効**） |
+| `wp-plugins-inactive` | `<プラグイン名>: 5.9.8` | 軸A・軸B（**無効。外部からは絶対に見えない**） |
+| `wp-active-theme` / `wp-themes-inactive` | 名前・`version` | 軸B |
+| `wp-server` | `php_version`（8.1.27）、`httpd_software`、`php_sapi` | **軸B（EOL）の主役** |
+| `wp-database` | `server_version`（例 MariaDB 10.6.18）、`extension` | 軸B |
+| `wp-media` | Imagick / GD の版 | 参考（将来） |
+
+- 値は**画面のテキストをそのまま使う**（`8.1.27`、`MariaDB 10.6.18`）。サイトの言語が日本語なら項目名も日本語になるため、**英語キーと日本語ラベルの両方**を辞書に持つ。
+- 「情報をクリップボードにコピー」で得られるテキスト（`php_version: 8.1.27` のような機械可読な形式）は、**パーサの正解データ**として PoC に使える（実装は DOM から読む）。
+- 抽出するのは**上表のキーだけ**。投稿・ユーザー・設定値などサイトの中身は読まない・保存しない。
+
+#### 代替手段との比較（なぜこれを選ぶか）
+
+| 方法 | PHP 版 | プラグイン全数 | 手間 | 判定 |
+| --- | --- | --- | --- | --- |
+| REST API（`/wp-json/`） | ✕ 提供されない | ✕ | — | 不可 |
+| 外部からの推定 | 20〜40% | 30〜60% | 0 | **補助** |
+| `phpinfo()` を置く | ○ | ✕ | 危険（情報露出） | **不可** |
+| 診断プラグインの追加 | ○ | ○ | 相手にインストールを強いる | 不可 |
+| ホスティング管理画面 | ○ | ✕ | 手作業・サイトごと | 案内のみ |
+| **Site Health 読み取り** | **○** | **○（無効も）** | **ログイン中に 1 クリック** | **採用** |
+
+#### できないこと・注意
+
+- **管理者としてログインしている自分のサイトだけ**。第三者のサイトでは使えない（他人の管理画面は見ない）。
+- ホスティングやセキュリティプラグインが Site Health を制限している場合は取れない → 灰のまま。
+- 行数が多いサイトでは、**必要なキーだけを抽出**してメモリとプライバシーの両方を守る。
+- 「読み取り」であって「自動修正」ではない。WordPress 自身の推奨事項（自動更新の設定など）は**参考として併記**するに留める。
+
+---
+
+## 7. リスク判定ロジック
+
+### 7.1 判定は「2 つの軸」で行う（v0.3 で再定義）
+
+| 軸 | 見るもの | 例 |
+| --- | --- | --- |
+| **軸A: 既知脆弱性** | そのコンポーネントのそのバージョンに該当する CVE | プラグイン contact-form-7 5.9.8 に CVE-2025-XXXX |
+| **軸B: ライフサイクル** | サポート終了・修正提供の有無・最新版との差 | **PHP 8.1（2025-12-31 にサポート終了）**、WordPress 6.2（サポート外） |
+
+- **脆弱性が 0 件でも、EOL なら「更新すべき」**。これが v0.3 の中心的な考え方。プラグインだけを見ていると、**PHP 8.1 のまま WordPress だけ最新にしているサイトを「問題なし」と誤って表示**してしまう。
+- 指摘（finding）は「**コンポーネント × 軸**」の単位で作る。画面ではコンポーネントごとに 1 行へまとめ、**プラグインだけを並べない**。
+
+### 7.2 検査対象コンポーネント（何を、どの確度で見られるか）
+
+| コンポーネント | 判定に必要な情報 | 主なシグナル | 外部からの検出 | 軸 |
+| --- | --- | --- | --- | --- |
+| **PHP** | バージョン（8.1 / 8.2 …） | `X-Powered-By`、エラーページ、**Site Health（要ログイン）** | **△ 公開しているサイトは限られる** | A・B |
+| **WordPress コア** | バージョン（6.8.2 …） | `meta generator`、`/wp-includes/...?ver=`、`/feed/` の generator | ○ ほぼ確実 | A・B |
+| **プラグイン** | slug + バージョン | `/wp-content/plugins/<slug>/`、`?ver=` | ○（フロントで動くもの） | A・B |
+| **テーマ** | slug + バージョン | `/wp-content/themes/<slug>/`、`?ver=` | ○ | A・B |
+| **JS ライブラリ** | 名前 + バージョン | ファイル名、`?ver=` | ○ | A・B |
+| **Web サーバ** | 製品 + バージョン | `Server` ヘッダ（要ヘッダ取得） | △ 隠蔽されがち | A・B |
+| **DB / OS** | — | 外部から不可視 | × | — |
+
+> **重要**: **PHP のバージョンは外部からは分からないことが多い**（`X-Powered-By` を消しているサイトが多数）。それでも判定を出すために、①ヘッダ等のパッシブ検出、②**自サイトの Site Health 読み取り（6.4）**、③ホスティング管理画面での確認を促す、の 3 段構えにする。
+
+### 7.3 軸B（ライフサイクル）の判定ルール
+
+| 状態 | 条件 | 判定 | 文言の例 |
+| --- | --- | --- | --- |
+| **サポート終了（EOL）** | `eol_date < 今日` | **黄以上**（既知の未修正脆弱性があれば赤） | 「PHP 8.1 は 2025-12-31 にサポートが終了しています。**修正版は提供されません**」 |
+| セキュリティサポートのみ | アクティブサポート終了 〜 EOL の間 | 黄 | 「新機能の追加はありません。セキュリティ修正のみ提供されています」 |
+| 最新版より遅れ | 最新版との差が 1 マイナー以上 | 情報（灰〜黄） | 「最新版は 6.8.2 です（現在 6.2）」 |
+| 最新 | 最新版と一致 | 緑の材料 | — |
+
+- PHP のサポート状況は **php.net を正**とする（本日 2026-10-29 時点の表は 1.1）。
+- WordPress コアは「**最新版以外はセキュリティ修正の対象外**」という前提で扱う。厳密なサポート範囲の定義は PoC で確認する（P0-16）。
+- jQuery 1.x/2.x、Bootstrap 3、AngularJS など**開発が終了した JS ライブラリ**も同じ扱い（`endoflife.date` と retire.js の情報を併用）。
+- **重要**: **EOL でなくてもリスクはある**。サポート中のブランチで公表された脆弱性は「パッチ版に上げる」ことで消える。これは軸A で拾い、7.4 で「直し方」に変換する。
+
+### 7.4 パッチレベルの脆弱性と「直し方の段階」（v0.4 追加）
+
+**EOL の判定だけでは足りない。** サポート中のブランチでも、**公表された脆弱性を修正したパッチ版が出ている**ことがあり、その場合は「同じブランチのまま最新パッチへ上げる」だけでリスクが消える。逆に EOL ブランチでは同じ脆弱性に**修正版が存在しない**ので、ブランチ移行が必要になる。この差を UI に出さないと「全部“更新してください”」になって、**一番安く消せるリスクが後回しになる**。
+
+| パターン | 例 | 必要な対応 | コスト |
+| --- | --- | --- | --- |
+| **パッチ未適用（サポート中のブランチ）** | PHP **8.3.26 → 8.3.28**（その CVE は 8.3.28 で修正） | 同一ブランチ内のパッチ更新 | **低（数分）** |
+| パッチ未適用（プラグイン） | contact-form-7 5.9.8 → 5.9.9 | プラグイン更新 | 低 |
+| パッチ未適用（コア） | WordPress 6.8.1 → 6.8.2 | コア更新 | 低 |
+| **ブランチが EOL** | PHP 8.1.27（8.1 系には修正版が出ない） | **ブランチ移行（8.3 / 8.4 へ）** | 中（検証が必要） |
+| メジャー遅れ | WordPress 6.2.6 → 6.8.2 | 事前検証して更新 | 中〜高 |
+| 使っていない資産 | 無効化済みプラグイン・旧テーマ | 削除 | 低 |
+| 外部依存 | 独自実装・SaaS のサーバ側 | ベンダ確認 | 高 |
+
+**判定ルール（修正版が分かっている場合）**
+
+```
+if 修正版あり and 修正版が同一ブランチ内:   → 「パッチ更新で解決」（今すぐ・低コスト）
+elif ブランチが EOL:                      → 「ブランチ移行が必要」（計画・中コスト）
+elif 修正版が別ブランチのみ:                → 「ブランチ移行が必要」
+else:                                    → 「修正版不明（要確認）」
+```
+
+- 表示は必ず **「何をすればいいか」** を添える（「更新してください」だけで終わらせない）。
+- **パッチ未適用は“今日消せるリスク”**なので、EOL より先に並べる（13.1 の並び順）。
+- 同じ脆弱性でも**ブランチごとに修正版が違う**（例: 8.2.20 / 8.3.8 / 8.4.1）。だから修正版は**ブランチ単位**で持つ（11 章の `affected.branch`）。
+- 修正版の情報は **php.net のリリース／チェンジログ**、NVD の CPE、GitHub の `php/php-src` アドバイザリ、JVN から作る（4 章・P0-19）。
+- 「パッチ版が出ているか」を判定するために、**製品ごとのリリース履歴（ブランチ・版・日付・修正した CVE）**を持つ（11 章の `release`）。
+
+### 7.5 スコア式（MVP 案）
+
+```
+base = 8 × max_cvss                      # 軸A: CVSS 0-10 → 0-80
+     + (kev ? 15 : 0)                    # 実際に悪用が観測されている
+     + (epss >= 0.5 ? 10 : epss >= 0.1 ? 5 : 0)
+     + (eol ? 10 : 0)                    # 軸B: サポート終了は単独でも重い
+     + (auth_required == false ? 5 : 0)  # 認証不要で到達できる
+score = round(clamp(base, 0, 100) × confidence_weight)
+```
+
+- `confidence_weight` = 1.00 / 0.85 / 0.60 / 0.40（6.2 の V1〜V6 に対応）
+- `max_cvss` は該当脆弱性のうち最大値。CVSS v4.0 があれば優先。
+- **軸B だけの指摘**（EOL のみ・CVE 0 件）は `score` を 55 で下限クランプし、黄以上にする（「脆弱性が無いから緑」を防ぐ）。
+
+### 7.6 4 段階の判定と「言い切らない」ルール
+
+| 判定 | 条件 | 画面の文言（例） |
+| --- | --- | --- |
+| 🔴 赤 | score ≥ 70、または KEV 該当（バージョン特定済み） | 「悪用が確認されている脆弱性に該当する可能性が高いです」 |
+| 🟡 黄 | 40 ≤ score < 70（**EOL 単独を含む**） | 「修正版が公開されています／サポートが終了しています。更新を検討してください」 |
+| ⚪ 灰 | **バージョン未特定**、または情報不足 | 「判定できません。プラグイン X が使われていますがバージョンが不明です」 |
+| 🟢 緑 | バージョン特定済み かつ score < 40 かつ EOL でない | 「検出できた範囲では該当なし（安全性を保証するものではありません）」 |
+
+**鉄則**
+
+1. **バージョンが取れない限り緑にしない**（灰に落とす）。
+2. 緑でも必ず「検出できた範囲では」と添える。
+3. **EOL は脆弱性 0 件でも単独で黄以上**。PHP 8.1 はすでに EOL（2025-12-31）、8.2 も 2026-12-31 で終了する。
+4. 判定根拠（シグナル名）を折りたたみで必ず出す。根拠が出せない指摘は表示しない。
+5. **「見えなかったもの」を必ず列挙する**（例: 「PHP のバージョンは不明です」「管理画面専用プラグインは対象外です」）。見えていないことを緑で塗りつぶさない。
+
+### 7.7 判定の流れ
+
+```
+[タブ] → L1 収集（DOM・リソース URL・meta）
+      → コンポーネント抽出（PHP / WordPress コア / プラグイン / テーマ / JS ライブラリ / サーバ）
+      → 軸A: バージョン範囲で CVE を照合（OSV range / NVD 本文の「before X」/ CPE）
+      → 軸B: ライフサイクル判定（EOL・サポート終了・最新版との差）
+      → KEV・EPSS を付与
+      → 修正版から「直し方」を決定（パッチ更新／ブランチ移行／メジャー更新／削除／ベンダ確認）
+      → コンポーネントごとに A/B を合成 → 判定色・根拠・**次の行動** → サイドパネルへ
+      → 並び順は「パッチ未適用（今すぐ安く消せる）」→「EOL・ブランチ移行」→「メジャー遅れ」
+```
+
+---
+
+## 8. 外部からどれだけ判定できるか（期待値と限界）
+
+「結局、外から何割くらい分かるのか」を先に共有する。以下は**見込み値**（WordPress の既定挙動と、よくある非表示化・最適化の実態から置いた数字）で、Phase 0 の **P0-21（50 サイト実測）**で置き換える。
+
+### 8.1 コンポーネント別の判定可能性
+
+| コンポーネント | 存在の検出 | **バージョン特定** | 判定できること | 主な阻害要因 |
+| --- | --- | --- | --- | --- |
+| WordPress サイト判定 | **95% 以上** | — | WP 製であること | ヘッドレス・完全カスタム |
+| **WordPress コア** | — | **85〜95%** | **軸A・軸B とも実用になる** | `generator` 削除、`?ver=` 除去、CDN |
+| **プラグイン（有効）** | **30〜60%**（有効数のうち） | 検出分の **50〜70%** | 軸A（CVE）・軸B（更新遅れ） | フロントにアセットを出さない／CSS・JS の結合・遅延読み込み／管理画面専用 |
+| テーマ | 85〜95% | 30〜50% | 軸B が中心 | 子テーマは版を出さない |
+| JS ライブラリ | 70〜90% | **70〜90%** | 軸A・軸B（EOL 含む） | webpack/Vite のバンドルで版が消える |
+| **PHP** | 50〜70% | **20〜40%** | 分かれば軸A（パッチ未適用）・軸B（EOL） | `expose_php=Off`、CDN。**ヘッダ取得の権限が無いと 0%** |
+| Web サーバ | 60〜80% | 40〜60% | 参考情報 | `Server` 非公開、Cloudflare |
+| **DB（MySQL 等）** | **0%** | **0%** | 不可 | 原理的に不可視（Site Health のみ） |
+
+**読み方**
+
+- **WordPress コアはほぼ確実に分かる。** これだけで「コアの更新遅れ／サポート外」は実用になる（＝企画の下限はここで担保）。
+- **プラグインは「半分見えて、そのまた半分しか版が分からない」。** 検出したプラグインの 3〜5 割は「灰」になる前提で UI を作る。`readme.txt`（6.2 の V4・L2）を併用すると版の特定率は上がる（同梱ファイルなので稼働版と一致しやすい。ただし商用プラグインは同梱していない）。
+- **PHP は外部では 2〜4 割。** つまり **PHP 8.1 の指摘は「運が良ければ出る」レベル**。Site Health（6.4）が本命で、外部検出は補助と位置づける。
+- **ヘッダを読まない設定（既定の案 A）では、PHP とサーバは 0%。** 「PHP の EOL を外から見たい」なら `webRequest`（観測のみ）を任意権限で入れる必要がある（10.2）。
+
+### 8.2 まとめ：「外部だけで答えられるか」
+
+| 知りたいこと | 外部だけで答えられるか |
+| --- | --- |
+| WordPress で作られているか | **ほぼ Yes**（95%+） |
+| WordPress コアは最新か／サポート内か | **ほぼ Yes**（85〜95%） |
+| どのプラグインが入っているか | **一部だけ**（有効の 30〜60%） |
+| そのプラグインは古いか／脆弱か | **さらに一部だけ**（版が分かったもの） |
+| PHP のバージョンは | **多くの場合 No**（20〜40%） |
+| DB のバージョンは | **No** |
+| サイト全体として「安全か」 | **No**（判定不能を明示する） |
+
+> この表は**そのまま README・CWS の説明文・UI の注意書きに転記する**。「できること」と「できないこと」を先に出すのが、公開サービスの信頼につながる。
+
+### 8.3 構造的な限界と対策
+
+| 限界 | 影響 | 対応 |
+| --- | --- | --- |
+| **PHP のバージョンが外部から分からない**（`X-Powered-By` 非公開が多数） | EOL を判定できず灰になる | Site Health 読み取り（6.4）／ホスティング管理画面での確認を促す／`X-Powered-By` があれば使う |
+| 管理画面専用プラグインは見えない | セキュリティ系プラグインの脆弱性を見逃す | UI に明記。自サイトは Site Health で解決（6.4） |
+| `?ver=` は改変されうる | 誤検知・見逃し | 確度表示、複数シグナル |
+| バージョン非公開化（`?ver` 除去、`X-Powered-By` 削除） | 灰が増える | 灰を恥じない UI。代替シグナル（ハッシュ照合）を将来対応 |
+| CDN・WAF によるヘッダ書き換え | サーバ情報が誤る | サーバ情報は「参考」扱いに格下げ |
+| カスタム実装・ヘッドレス構成 | プラットフォーム判定不能 | 判定不能として明示 |
+| Shopify のサーバ側 | 判定不能（原理的） | 期待値をフロント資産に限定 |
+| 相手サイトの許可なく詳細取得すると摩擦 | 苦情・ブロック | L2/L3 は明示同意、レート制限、`robots.txt` 遵守 |
+| アセットの結合・遅延読み込み（Autoptimize / WP Rocket 等） | プラグインの slug と版が消える | L1 では取れない。`readme.txt`（L2）で補完。取れなければ灰 |
+| 商用・独自プラグイン | `readme.txt` が無く、版も出さない | 灰。テーマ名とベンダ名だけ出す |
+
+### 8.4 1 サイトあたりの現実的な姿（期待値の使い方）
+
+- 検出できるコンポーネント: **だいたい 5〜12 件**（WP コア 1・プラグイン 3〜8・テーマ 1・JS ライブラリ 1〜3）
+- そのうち **「更新すべき」: 1〜3 件**（コアのパッチ遅れ、プラグインの修正版あり、EOL のいずれか）
+- **「灰（判定不能）」: 2〜5 件**（版が不明なプラグイン、PHP 不明 など）
+- **赤（悪用確認済み等）は稀**。出たら本当にまずい、という設計にする（＝偽陽性を強く抑制する）
+
+**この期待値を前提にした言い方**
+
+| 言わない | 言う |
+| --- | --- |
+| 「このサイトは安全です」 | 「検出できた 7 件のうち、更新が必要なものは 2 件でした」 |
+| 「脆弱性はありません」 | 「バージョンが分からず判定できないものが 3 件あります」 |
+| 「全プラグインを検査しました」 | 「画面に出ているプラグイン 5 件を検査しました（管理画面専用は対象外）」 |
+
+### 8.5 実測（P0-21 の初回・n=4）
+
+対象: `wordpress.org` / `ja.wordpress.org` / `php.net` / `example.com`（2026-10-29、各 1 リクエスト・delay 1s）
+
+| 指標 | 見込み（8.1） | **実測 n=4** | メモ |
+| --- | --- | --- | --- |
+| プラットフォーム判定 | 95% 以上 | 2/4（50%） | 2 件は WordPress でないサイトなので妥当 |
+| コア版の特定 | 85〜95% | **2/2（100%）** | `meta generator` から確定（片方は `7.2-beta3-64914`） |
+| プラグイン検出 | 30〜60% | 平均 0.5 件/サイト | WP サイトは各 1 件（`gutenberg` 24.3.0）。**版も取得できた** |
+| **PHP 版の特定** | 20〜40% | **0/4（0%）** | `X-Powered-By` なし。**Site Health が必須**という結論を裏付けた |
+| サーバ版の特定 | 40〜60% | **0/4（0%）** | `Server: nginx` のみ（版は非公開） |
+| プラグイン版の特定率 | 50〜70% | 2/2（100%） | 検出できたものは版も取れている（n が小さい） |
+
+- **サンプル 4 件なので参考値**。ただし「PHP とサーバのバージョンは外からほぼ取れない」は 8.1 の見込みを**むしろ悲観側に裏切る**結果で、**PHP を外部検出に頼る設計は成立しない**ことが確かめられた。
+- そのため KPI の「PHP 版数の特定率（外部）30% 以上」は、実測次第で**「計測して記録する（目標値を設けない）」に変える**（P0-21 本番で判断）。
+- 再現手順: `uv run svc-survey --urls <自分のリスト> --delay 1.0` → `uv run svc-report` で HTML 化。
+
+---
+
+## 9. 非機能要件
+
+| 区分 | 要件 |
+| --- | --- |
+| **鮮度** | NVD/OSV の差分取り込みは 6 時間ごと、KEV・EPSS・EOL は日次。画面に「最終取得時刻」を常時表示 |
+| **性能（一覧）** | 10 万行の絞り込みで p95 1 秒以内。詳細表示 300ms 以内 |
+| **性能（拡張）** | アイコンクリックからサイドパネル表示まで 2 秒以内。インデックスは IndexedDB に保持し、2 回目以降は 300ms 以内 |
+| **データ量** | 拡張が持つ照合インデックスは gzip で 20MB 以下（WordPress プラグイン＋主要 JS ライブラリ＋EOL）。超える場合は対象を「脆弱性が存在するパッケージ」に限定 |
+| **プライバシー** | 閲覧 URL をサーバへ送らない（照合はローカル）。送る場合は明示同意＋送信内容の画面表示。既定は送信しない |
+| **オフライン** | 照合はオフラインでも動作（取得済みインデックスの範囲で）。データが古い場合は「◯日前のデータ」と表示 |
+| **権限** | 最小権限。`activeTab` + `scripting` を基本とし、`<all_urls>` の常時 host permission は要求しない（後述の設計判断） |
+| **セキュリティ（拡張自身）** | MV3 の CSP を維持し、**リモートコードを読み込まない**。依存は固定バージョン。`innerHTML` を使わず `textContent`／テンプレートで描画（XSS 対策）。ビルドは再現可能にし、リリース物のハッシュを記録 |
+| **可用性** | 外部 API 障害時は前回スナップショットで継続。指数バックオフとサーキットブレーカ |
+| **監査** | 取り込みログ（ソース、件数、失敗理由）を残す。データの出所（`source`）と取得時刻を全レコードに保持 |
+| **多言語** | 日本語を既定、英語を切替。日本語要約が無い場合は英語原文をそのまま出す（機械翻訳を無理に使わない） |
+| **コスト** | 無償データのみで成立。**有償データ（WPScan / Patchstack）は無料公開と両立しない**ため採用しない（4 章） |
+
+---
+
+## 10. アーキテクチャ
+
+```
+┌──────────────── データ源（すべて公開/無償を基本） ────────────────┐
+│ NVD API 2.0   OSV (GCS ダンプ + modified_id.csv)   CISA KEV      │
+│ EPSS API/CSV  JVN iPedia (MyJVN API)               endoflife.date │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │ 6h / 日次・差分取得（指数バックオフ）
+                               ▼
+                 ┌──────────────────────────────┐
+                 │ 収集・正規化バッチ（Python/uv）│
+                 │ ・名寄せ（purl / CPE / slug）  │
+                 │ ・日本語要約の付与             │
+                 │ ・原本ハッシュと取得時刻を記録 │
+                 └──────────────┬───────────────┘
+                                ▼
+                 ┌──────────────────────────────┐
+                 │ PostgreSQL（開発初期は SQLite）│
+                 │ vuln / affected / eol /       │
+                 │ tech_signature / finding      │
+                 └───────┬──────────────┬────────┘
+                         │              │
+             ┌───────────▼───┐   ┌──────▼─────────────────────┐
+             │ 一覧ダッシュボード │   │ 照合インデックス生成         │
+             │ FastAPI + SPA   │   │ ・JSON(gzip) フル/差分       │
+             │ （社内ブラウザ） │   │ ・バージョン→CVE の索引      │
+             └─────────────────┘   └──────┬─────────────────────┘
+                                          │ HTTPS
+                                          ▼
+        ┌──────────────── Chrome 拡張（Manifest V3） ────────────────┐
+        │ Service Worker  … 判定ロジック、インデックス保持、バッジ     │
+        │ chrome.scripting … activeTab 上で L1 収集関数を実行          │
+        │ Side Panel      … 結果表示（既存拡張と同じ構成）              │
+        │ ※ 外部通信は自前インデックス配信のみ（API キーを持たない）    │
+        └───────────────────────────────────────────────────────────┘
+```
+
+### 10.1 技術選定と理由
+
+| 層 | 採用 | 理由 |
+| --- | --- | --- |
+| 収集・正規化 | Python 3.13+ / uv / httpx / pydantic | 既存 `kotoba-desktop` と同じ流儀（pydantic でスキーマ検証、ruff、pytest）。処理は文字列と JSON が中心で十分 |
+| スケジューラ | GitHub Actions cron（または Windows タスクスケジューラ） | 追加インフラ不要。失敗通知も標準機能で足りる |
+| DB | PostgreSQL（開発初期は SQLite） | 全文検索（`pg_trgm`）、JSONB、配列型が便利。MVP は SQLite で開始して差し替え可能にする |
+| API | FastAPI | 型付きスキーマ（pydantic）と OpenAPI 自動生成。既存の `localhost:8000` 構成と揃う |
+| 画面 | SPA か htmx（実装コスト優先で htmx も可） | 一覧と詳細が中心。過剰な SPA は不要 |
+| 拡張 | Manifest V3 + Side Panel + `chrome.scripting` | 既存の MV3 拡張の実装パターンをそのまま流用できる（`extract(tab.id)` → 判定 → `send()` でサイドパネルへ） |
+| 拡張のローカル保存 | `chrome.storage.local`（設定・トークン）＋ IndexedDB（照合インデックス） | トークンは `storage.local` のみ。`sync` には置かない |
+
+### 10.2 拡張の権限設計（審査を通すための判断）
+
+| 案 | 権限 | 挙動 | 評価 |
+| --- | --- | --- | --- |
+| **A（既定）** | `activeTab`, `scripting`, `sidePanel`, `storage`, `alarms` | アイコンを押したときだけ現在タブを判定 | 最小権限。審査が通りやすい。**バッジの自動更新はできない** |
+| B（任意） | A + `optional_host_permissions: ["https://*/*"]` | 明示許可したらタブ移動時に自動判定しバッジ更新 | 便利だが審査で説明を求められる。設定で ON/OFF |
+| C | `host_permissions: ["<all_urls>"]` + `webRequest` | レスポンスヘッダも常時取得 | 権限が強すぎる。**採用しない** |
+
+- ヘッダ（`Server` / `X-Powered-By` / `Set-Cookie`）は MV3 では **`webRequest` の観測のみ可能**（`webRequestBlocking` は MV3 で原則使えない）。権限が重いので **v1 の任意機能**とし、無くても判定が成立する設計にする（L1 だけで WordPress は判定できる）。
+- `content_scripts` を `<all_urls>` で宣言しない。`chrome.scripting.executeScript` を `activeTab` に対して使う（既存拡張と同じ）。
+
+---
+
+## 11. データモデル
+
+### 11.1 ER 概要
+
+```
+vuln ─< affected >（ecosystem, package, branch, バージョン範囲）
+  │
+  └─< finding >─ asset（project / site）
+eol（product, cycle, サポート終了日）
+release（product, branch, version, その版で直った CVE）
+tech_signature（tech, kind, pattern, バージョンのキャプチャ位置, 確度）
+```
+
+### 11.2 DDL（MVP・SQLite/PostgreSQL 共通の範囲で記述）
+
+```sql
+-- 製品のリリース履歴（ブランチ／パッチ版）。「最新パッチとの差」と「どの版で直ったか」に使う
+CREATE TABLE release (
+  product     TEXT NOT NULL,               -- php | wordpress | jquery | bootstrap ...
+  branch      TEXT NOT NULL,               -- 8.3 / 6.2
+  version     TEXT NOT NULL,               -- 8.3.28
+  released_at TEXT NOT NULL,
+  is_security INTEGER NOT NULL DEFAULT 0,  -- セキュリティ修正を含む版か
+  cves        TEXT,                        -- その版で修正された CVE（JSON 配列）
+  source      TEXT NOT NULL,               -- php.net | wordpress.org | endoflife.date ...
+  PRIMARY KEY(product, version)
+);
+CREATE INDEX idx_release_branch ON release(product, branch, released_at DESC);
+```
+
+```sql
+-- 脆弱性（正規化）
+CREATE TABLE vuln (
+  id            TEXT PRIMARY KEY,          -- 内部 ID（例: osv:GHSA-xxxx / nvd:CVE-2026-0001）
+  source        TEXT NOT NULL,             -- nvd | osv(ghsa) | jvn | kev | epss
+  source_id     TEXT NOT NULL,             -- CVE-2026-0001 / GHSA-xxxx / JVNDB-2026-000001
+  cve_id        TEXT,
+  title         TEXT NOT NULL,
+  title_ja      TEXT,
+  summary       TEXT,
+  summary_ja    TEXT,
+  published_at  TEXT,
+  modified_at   TEXT,
+  cvss_v3_score REAL,
+  cvss_v3_vec   TEXT,
+  cvss_v4_score REAL,
+  cvss_v4_vec   TEXT,
+  severity      TEXT,                      -- critical | high | medium | low
+  epss          REAL,                      -- 0..1
+  epss_percentile REAL,
+  epss_updated_at TEXT,
+  kev           INTEGER NOT NULL DEFAULT 0,
+  kev_added_at  TEXT,
+  kev_due_date  TEXT,
+  ransomware    INTEGER,
+  cwe           TEXT,                      -- JSON 配列
+  auth_required INTEGER,                   -- 0: 不要, 1: 必要, NULL: 不明
+  refs          TEXT,                      -- JSON 配列
+  raw_hash      TEXT,                      -- 原本のハッシュ（再取り込み判定）
+  fetched_at    TEXT NOT NULL,
+  UNIQUE(source, source_id)
+);
+CREATE INDEX idx_vuln_cve  ON vuln(cve_id);
+CREATE INDEX idx_vuln_kev  ON vuln(kev, published_at);
+CREATE INDEX idx_vuln_epss ON vuln(epss DESC);
+
+-- 影響を受けるパッケージ／バージョン範囲
+CREATE TABLE affected (
+  id            INTEGER PRIMARY KEY,
+  vuln_id       TEXT NOT NULL REFERENCES vuln(id) ON DELETE CASCADE,
+  ecosystem     TEXT NOT NULL,             -- Packagist | npm | PyPI | WordPress | core:php ...
+  package       TEXT NOT NULL,             -- composer 名 / npm 名 / plugin slug
+  purl          TEXT,                      -- pkg:composer/vendor/name
+  cpe           TEXT,
+  range_type    TEXT NOT NULL,             -- ECOSYSTEM | SEMVER | GIT
+  branch        TEXT,                      -- 8.3 / 6.2（コア製品はブランチごとに修正版が違う）
+  introduced    TEXT,
+  fixed         TEXT,
+  last_affected TEXT,
+  platform      TEXT,                      -- 例: wordpress-plugin
+  UNIQUE(vuln_id, ecosystem, package, introduced, fixed, last_affected)
+);
+CREATE INDEX idx_affected_lookup ON affected(ecosystem, package);
+```
+
+```sql
+-- EOL（PHP, WordPress, Laravel 等）
+CREATE TABLE eol (
+  product      TEXT NOT NULL,
+  cycle        TEXT NOT NULL,              -- 8.2 / 6.8
+  released     TEXT,
+  active_support_until   TEXT,
+  security_support_until TEXT,
+  eol_date     TEXT,
+  latest       TEXT,
+  source       TEXT NOT NULL,
+  fetched_at   TEXT NOT NULL,
+  PRIMARY KEY(product, cycle)
+);
+
+-- 技術検出シグネチャ（拡張と共有する定義。DB から JSON を書き出して拡張に配る）
+CREATE TABLE tech_signature (
+  id              INTEGER PRIMARY KEY,
+  tech            TEXT NOT NULL,           -- wordpress | shopify | php | jquery ...
+  kind            TEXT NOT NULL,           -- meta | header | path | script | cookie | dom
+  pattern         TEXT NOT NULL,           -- 正規表現
+  version_capture INTEGER NOT NULL,        -- 何番目のキャプチャがバージョンか（0 は版なし）
+  confidence      REAL NOT NULL,           -- 0..1
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  note            TEXT
+);
+
+-- 資産（プロジェクト or サイト）
+CREATE TABLE asset (
+  id         INTEGER PRIMARY KEY,
+  kind       TEXT NOT NULL,                -- project | site
+  name       TEXT NOT NULL,
+  url        TEXT,
+  owner      TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- 検出結果（履歴つき）
+CREATE TABLE finding (
+  id               INTEGER PRIMARY KEY,
+  asset_id         INTEGER REFERENCES asset(id),
+  vuln_id          TEXT REFERENCES vuln(id),
+  component        TEXT NOT NULL,          -- contact-form-7 / jquery
+  detected_version TEXT,
+  confidence       REAL NOT NULL,
+  evidence         TEXT,                   -- JSON 配列
+  score            INTEGER NOT NULL,
+  level            TEXT NOT NULL,          -- red | yellow | gray | green
+  status           TEXT NOT NULL DEFAULT 'open',  -- open | accepted | false_positive | fixed
+  first_seen       TEXT NOT NULL,
+  last_seen        TEXT NOT NULL
+);
+CREATE INDEX idx_finding_asset ON finding(asset_id, level);
+```
+
+### 11.3 名寄せ（地味に一番むずかしい部分）
+
+| 問題 | 対応 |
+| --- | --- |
+| NVD は CPE、OSV は purl、WordPress は slug | 内部キーは **`ecosystem + package`** に統一し、CPE・purl・slug は「別名」として保持 |
+| 同じ脆弱性が NVD と OSV の両方にある | `cve_id` で突合し表示は 1 件にまとめる（`source` は複数保持） |
+| WordPress プラグインの表示名と slug が違う | slug を正とする（**WordPress.org の slug と一致させる**） |
+| バージョン表記の揺れ（`1.0` / `1.0.0` / `v1.0`） | semver に正規化して比較（`1.0` = `1.0.0`） |
+| OSV のレンジ種別が `ECOSYSTEM` | ベンダ固有の順序規則が必要なため「判定不能」として扱う（誤判定より無判定を選ぶ） |
+
+---
+
+## 12. 拡張の実装イメージ
+
+既存の MV3 拡張の構成（`manifest.json` / `background.js` / `sidepanel.*`）をそのまま踏襲する。
+
+### 12.1 manifest.json（案）
+
+```json
+{
+  "manifest_version": 3,
+  "name": "サイト脆弱性チェッカー",
+  "version": "0.1.0",
+  "description": "いま開いているサイトの技術構成を推定し、既知の脆弱性を根拠つきで表示します。",
+  "permissions": ["sidePanel", "activeTab", "scripting", "storage", "alarms"],
+  "optional_host_permissions": ["https://*/*"],
+  "host_permissions": ["https://data.example.com/svc/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "サイト脆弱性チェッカー — このサイトを調べる" },
+  "options_page": "options.html"
+}
+```
+
+- `host_permissions` は**自前 API のみ**。`<all_urls>` は要求しない。
+- 「自動でバッジを更新する」を ON にしたときだけ `chrome.permissions.request({origins:["https://*/*"]})` で任意権限を追加する（案 B）。
+
+### 12.2 L1 収集（`activeTab` 上で実行する関数）
+
+```js
+// background.js から chrome.scripting.executeScript({target:{tabId}, func: collectL1}) で実行
+function collectL1() {
+  const res = [];
+  for (const e of performance.getEntriesByType("resource")) res.push(e.name);
+
+  const meta = {};
+  for (const m of document.querySelectorAll("meta[name], meta[property]")) {
+    meta[(m.getAttribute("name") || m.getAttribute("property")).toLowerCase()] =
+      m.getAttribute("content") || "";
+  }
+
+  return {
+    url: location.href,
+    generator: meta["generator"] || "",
+    htmlLang: document.documentElement.lang || "",
+    hasWpApiLink: !!document.querySelector('link[rel="https://api.w.org/"]'),
+    resources: res.slice(0, 2000),       // 念のため上限
+    resourceCount: res.length,
+    shopify: typeof window.Shopify !== "undefined",
+    nextData: !!document.getElementById("__NEXT_DATA__"),
+    generatorMetaAll: Array.from(
+      document.querySelectorAll('meta[name="generator"]'), (m) => m.content
+    ),
+  };
+}
+```
+
+> `performance.getEntriesByType("resource")` は**すでに読み込まれた**リソースしか返さない。`?ver=` や `/wp-content/plugins/<slug>/` の抽出には十分（実際に動作しているものだけが取れる＝有効化の証拠になる）。
+
+### 12.3 判定本体（Service Worker）
+
+```js
+// 1) L1 収集 → 2) 正規化 → 3) インデックス照合 → 4) スコア合成 → 5) サイドパネルへ送信
+async function inspect(tab) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id }, func: collectL1,
+  });
+
+  const components = extractComponents(result);     // PHP/WPコア/プラグイン/テーマ/JS/サーバ
+  const index = await loadIndex();                  // IndexedDB（日次で差分更新）
+
+  const findings = [];
+  for (const c of components) {
+    // 軸A: 既知脆弱性（バージョン範囲で照合）
+    for (const v of index.lookup(c)) {
+      findings.push({ axis: "A", component: key(c), ...v, confidence: c.confidence });
+    }
+    // 軸B: ライフサイクル（EOL・最新版との差）
+    const life = index.lifecycle(c);
+    if (life.eol) findings.push({ axis: "B", component: key(c), ...life,
+                                  confidence: c.confidence });
+  }
+
+  const verdict = score(findings);                  // 7.5 の式
+  const report = { url: result.url, components, findings, verdict,
+                   limits: LIMIT_NOTES, scannedAt: new Date().toISOString() };
+
+  await chrome.storage.session.set({ ["last:" + tab.id]: report });
+  chrome.runtime.sendMessage({ type: "report", report }).catch(() => {});
+  return report;
+}
+```
+
+### 12.4 インデックスの配り方
+
+| 方式 | 内容 | 評価 |
+| --- | --- | --- |
+| 全量スナップショット | `https://api/index/full.json.gz`（日次） | 単純。20MB 前後なら許容。初回のみ |
+| **差分** | `https://api/index/delta.json?since=<version>` | 日次の通信量が小さい。**採用** |
+| オンデマンド照会 | 判定のたびにサーバへ問い合わせ | プライバシー（URL・構成がサーバに渡る）と速度で不利。**既定では使わない** |
+
+`chrome.alarms` で 24 時間ごとに差分を取得し、`storage.local` に最終適用バージョンを保存する。
+
+### 12.5 外部 API キーを使わない構成（BYOK の廃止）
+
+v0.2 で **BYOK は廃止**した。理由は、不特定多数への無料提供では「拡張が WPScan のデータを組み込んだサービス」と見なされ、規約上 Enterprise 契約が必要になるため。結果として拡張は次の性質を持つ。
+
+- **拡張が外部と通信するのは自前のインデックス配信（静的 JSON）だけ**。第三者サイトの判定に外部 API 呼び出しは使わない。
+- **拡張にシークレット（API トークン）を持たせない**。漏洩・悪用のリスクが構造的にゼロになる。
+- ユーザーが設定できるのは「自動判定の ON/OFF」「データ更新の頻度」「言語」程度。設定項目が少ないほど、審査も説明も楽になる。
+- WordPress プラグインの修正版情報は、**収集バッチ側で CVE 本文から抽出してインデックスに埋め込む**（4.3）。拡張は受け取ったインデックスを引くだけ。
+
+---
+
+## 13. 画面設計
+
+### 13.1 拡張（サイドパネル）
+
+```
+┌──────────────────────────────────────────────┐
+│ 🔴 要確認の項目があります（スコア 88 / 100）    │
+│ https://example.com/                          │
+│ 判定 2026-10-29 12:34 ／ データ 2026-10-29     │
+├──────────────────────────────────────────────┤
+│ ■ 更新すべきもの（4 件）                        │
+│  ① 今すぐ（パッチで消える・低コスト）           │
+│   🔴 contact-form-7 5.9.8（推定 高）           │
+│      CVE-2025-XXXX CVSS 9.8 KEV✅ → 5.9.9 へ    │
+│   🟡 WordPress 6.8.1（確度 高）→ 6.8.2 へ       │
+│  ② 計画して対応（ブランチ移行・メジャー）        │
+│   🟡 PHP 8.1.27（推定 中）                     │
+│      ⚠ 2025-12-31 EOL／8.1 系に修正版なし       │
+│      → 8.3 以降へ移行（検証が必要）             │
+│   🟡 jQuery 1.12.4 → 3.x へ（1.x は開発終了）   │
+├──────────────────────────────────────────────┤
+│ ■ 構成（検出できたもの）                        │
+│   WordPress 6.8.1 ／ PHP 8.1.27（推定）        │
+│   プラグイン 4 件 ／ テーマ 1 件                │
+│   jQuery 1.12.4 ← ⚠ EOL（1.x は開発終了）     │
+├──────────────────────────────────────────────┤
+│ ■ 判定できなかったもの（灰 2 件）               │
+│   ・PHP の正確な版（サーバが公開していません）    │
+│   ・wp-super-cache（バージョン不明）            │
+│   → 管理者なら Site Health で正確に分かります    │
+│     [サイトヘルスを開く]                        │
+├──────────────────────────────────────────────┤
+│ ■ 検出できた範囲の注意                          │
+│   ・管理画面専用プラグインは対象外です           │
+│   ・安全性を保証するものではありません           │
+│ [詳しく調べる（+3 リクエスト）] [レポート保存]   │
+└──────────────────────────────────────────────┘
+```
+
+- **判定色 → アイコンのバッジ**にも反映（案 B の自動判定時）。
+- **「①今すぐ」と「②計画」を分ける**（7.4 の分類）。同じ赤でも**パッチで消えるものを上に出す**。「PHP が 8.3.26 で未修正の CVE がある」場合は ① に「→ 8.3.28 へパッチ更新」として現れる。
+- 「更新すべきもの」は **軸A（CVE）と軸B（EOL）を 1 コンポーネント 1 行にまとめ**、🔴 → 🟡 の順に並べる。「プラグインが 0 件だから緑」にはしない。
+- 各コンポーネントに**軸ごとの結論**を出す（例: 「contact-form-7 … 軸A 🔴 / 軸B ✓」「PHP … 軸A 不明 / 軸B 🟡 EOL」）。
+- 「根拠を見る」で `evidence`（`meta:generator`、`asset:?ver=5.9.8` など）を表示。**根拠の無い指摘は出さない**。
+- 「コピー」で共有用のテキスト（URL・判定・CVE・修正版・判定時刻・「推定である」旨）をクリップボードへ。
+
+### 13.2 一覧ダッシュボード
+
+| 画面 | 内容 |
+| --- | --- |
+| 脆弱性一覧 | 列: CVE / タイトル / エコシステム / パッケージ / 影響版 / 修正版 / CVSS / EPSS / KEV / 公開日。KEV と EPSS で既定ソート |
+| 絞り込み | エコシステム、KEV のみ、EPSS ≥ 0.1、EOL 製品を含む、修正版あり、期間 |
+| 資産ビュー | プロジェクト／サイトごとに finding を集計（赤黄灰の件数、最終確認日） |
+| 詳細 | 日本語要約、CVSS ベクタの内訳、EPSS 推移（あれば）、KEV 期限、参照リンク、影響パッケージ一覧 |
+| 取り込み | マニフェストのドラッグ＆ドロップ、結果の差分表示、CycloneDX 出力 |
+| データ鮮度 | ソース別の最終取得時刻と件数、失敗の有無 |
+
+---
+
+## 14. 既存ソリューションとの比較（差別化）
+
+|  | **サイト脆弱性チェッカー（本企画）** | WPScan CLI | Wordfence（WPプラグイン） | Patchstack | Retire.js 拡張 | OSV-Scanner |
+| --- | --- | --- | --- | --- | --- | --- |
+| 対象 | WordPress + PHP + OSS 全般 + フロント資産 | WordPress | WordPress | WordPress | JS ライブラリ | OSS パッケージ（手元のコード） |
+| 閲覧中サイトをその場で判定 | ✅ | ❌（CLI） | 自サイトのみ | 自サイトのみ | ✅（JS のみ） | ❌ |
+| 言語/フレームワーク横断の一覧 | ✅ | ❌ | ❌ | ❌ | △ | ✅ |
+| KEV / EPSS / EOL を合成した優先順位 | ✅ | ❌ | △ | △ | ❌ | ❌ |
+| **PHP など土台の EOL を指摘** | ✅ | ❌ | ❌ | △ | ❌ | ❌ |
+| 日本語の説明 | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| プラグインの「有効化」推定 | ✅（フロントに出るもの） | △ | ✅（管理画面） | ✅（管理画面） | ❌ | ❌ |
+| 導入コスト | **完全無料**（OSS と公開データのみ） | 無償枠あり | 無償枠あり | 有償 | 無償 | 無償 |
+
+**差別化の核**: 「(1) 横断的な一覧」と「(2) その場でのサイト判定」を**1 つのデータ基盤で**つなぐこと。既存ツールはどちらか片方に寄っている。
+
+---
+
+## 15. リスクと対策
+
+| # | リスク | 影響 | 対策 |
+| --- | --- | --- | --- |
+| R1 | **誤検知**（`?ver=` の改変、テーマによるバージョン偽装） | 信用を失う／不要な対応コスト | 確度表示、複数シグナルの一致、断定表現の禁止、「これは違う」フィードバック |
+| R2 | **未検出**（管理画面専用プラグイン、WAF による隠蔽） | 見逃し＝誤った安心 | 「検出できた範囲」の明示、灰判定の用意、免責の常時表示 |
+| R3 | **データライセンス違反**（CC-BY-4.0 の出典表示漏れ、JVN のクレジット欠落） | 公開停止・信用喪失 | ライセンス画面を必須機能に（4.2）。ソースごとの出典を自動生成し、テストで欠落を検出 |
+| R4 | **相手サイトへの負荷・無断アクセス** | 苦情、ブロック、法的リスク | パッシブ中心、L2/L3 は明示同意＋レート制限＋`robots.txt` 遵守、GET のみ |
+| R5 | **Chrome Web Store 審査落ち**（権限過多、セキュリティ系の説明不足） | 配布できない | 最小権限、プライバシーポリシー、説明文の整備（20 章）。**まず unpacked で検証し、説明文と権限を固めてから申請** |
+| R6 | **拡張自身の脆弱性**（XSS、サプライチェーン） | 利用者の被害・信用喪失 | リモートコード禁止、`textContent` 描画、依存固定、CSP 維持、コードレビュー |
+| R7 | **データ品質**（NVD の CPE 揺れ、OSV の ECOSYSTEM レンジ） | 誤った該当判定 | `ecosystem + package` を正とし、判定不能は「不明」に落とす |
+| R8 | **外部 API の仕様変更・停止**（NVD/EPSS/JVN 等） | データ欠損 | ソースを抽象化（アダプタ）、前回スナップショット保持、失敗の可視化 |
+| R9 | **「安全」と誤解される** | 損害時の責任 | 緑でも「保証しない」、判定時刻とデータ日付の表示、利用規約に免責 |
+| R10 | **運用の形骸化**（データ更新が止まる） | 陳腐化した判定 | 鮮度の画面表示、失敗通知、GitHub Actions の失敗を Slack へ |
+| R11 | **責任範囲の不明確さ**（第三者サイトを調べる） | 対人トラブル | 用途を「自社・許諾済みサイト」に限定する利用規約。第三者サイトは「公開情報の閲覧範囲」に留める |
+
+---
+
+## 16. 進め方
+
+### 16.1 フェーズと関門
+
+| フェーズ | 期間 | 内容 | 関門（合格条件） |
+| --- | --- | --- | --- |
+| **Phase 0: PoC** | 2 週間 | データ取得の実測、検出精度の実測、**CVE 本文解析（4.3）の成立確認**、インデックスサイズの見積り | G0: WordPress 20 サイトでプラットフォーム判定 90% 以上、バージョン特定 60% 以上、**修正版特定 50% 以上**、赤判定の誤検知 5% 未満の**見込みが立つ** |
+| **Phase 1: MVP** | 6 週間 | 収集基盤＋拡張β（**PHP / WordPress コア / プラグイン / テーマ / JS ライブラリの 2 軸判定**）＋EOL データ＋ライセンス画面。unpacked で自分用に常用 | G1: 1 週間の常用で「判定が遅い／落ちる」が 0 件、**「更新すべきもの」が納得できる**（灰の説明が通じる） |
+| **Phase 2: v1（公開）** | 8 週間 | 表現ガイドラインの適用、プライバシーポリシー・免責・異議申立て窓口、**Site Health 読み取り（6.4）**、**Chrome Web Store 公開**、任意のヘッダ取得、誤検知フィードバック | G2: 誤検知率 5% 未満（標本 50 件）、判定 2 秒以内、**審査通過**、公開後 1 か月で重大クレーム 0 件 |
+| **Phase 3: v2** | 未定 | Shopify / Drupal / Joomla、一覧ダッシュボードの公開、通知、管理画面ログイン時の棚卸し | — |
+
+### 16.2 PoC（Phase 0）の検証項目
+
+| ID | 検証内容 | 合格の目安 |
+| --- | --- | --- |
+| P0-01 | NVD API 2.0 の実測（レート制限、期間指定の上限、`resultsPerPage` 上限） | 差分同期が 6 時間以内に完了する見込み |
+| P0-02 | OSV の GCS ダンプ（`all.zip`／`Packagist/all.zip`／`modified_id.csv`）のサイズと取り込み時間 | Packagist 分が現実的な時間で同期できる |
+| P0-03 | KEV・EPSS の取得と突合（CVE での結合） | 欠損率・結合率を計測 |
+| P0-04 | MyJVN API の疎通・仕様・利用条件（クレジット表記） | 日本語要約が取得できる／条件が明確 |
+| P0-05 | endoflife.date の PHP/WordPress/Laravel の EOL 取得 | 表が再現できる（php.net の表と一致） |
+| P0-06 | WordPress 実サイト 20 件でのプラットフォーム判定 | 適合率 90% 以上 |
+| P0-07 | プラグイン slug 抽出台数と、`?ver=` によるバージョン特定率 | 特定率 60% 以上、誤バージョン 5% 未満 |
+| P0-08 | Shopify サイト 10 件で判別＋JS ライブラリ検出 | 判別 90% 以上、ライブラリ検出 3 件以上/サイト |
+| P0-09 | 照合インデックスのサイズ（gzip） | 20MB 以下 |
+| P0-10 | `activeTab` + `chrome.scripting` で `performance` エントリが取れるか（CSP/サブフレームの影響） | 主要 20 サイトで取得できる |
+| P0-11 | **CVE 本文から「before X.Y.Z」を抽出できるか**（WordPress プラグイン 100 件の標本） | 抽出成功率 80% 以上、他製品の版を誤って拾う件数がほぼ 0 |
+| P0-12 | 誤検知の実測（赤判定を人手で検証） | 5% 未満 |
+| P0-13 | **NVD CPE（`target_sw=wordpress`）と slug の一致率** | 50% 以上なら本文解析より優先して使う |
+| P0-14 | WordPress.org Plugin API で slug→表示名を引けるか（存在しない slug・リネームの扱い） | 成功率 95% 以上、レート内で完結 |
+| P0-15 | **PHP 版数が外部からどれだけ分かるか**（WordPress 30 サイトで `X-Powered-By` 等を実測） | 特定率 30% 以上（下回るなら Site Health 導線を前面に出す） |
+| P0-16 | **WordPress コアのサポート範囲／EOL の定義**（endoflife.date と WordPress 公式の記述を突き合わせ） | 判定ルールを 1 つに決められる |
+| P0-17 | **EOL データの精度**（PHP・jQuery・Bootstrap・AngularJS の EOL 日を php.net / endoflife.date と突き合わせ） | 誤り 0 件 |
+| P0-18 | Site Health（`site-health.php?tab=debug`）の DOM から PHP・DB・プラグイン一覧を抽出できるか | 5 サイト中 5 件で取得、誤抽出 0 |
+| P0-19 | **PHP の「CVE → ブランチ別の修正版」を機械的に作れるか**（php.net チェンジログ／`php-src` アドバイザリ／NVD CPE） | 対象 CVE の 80% 以上で修正版が取れる |
+| P0-20 | **「パッチ未適用」を正しく検出できるか**（WP コア・プラグイン 10 サイトで、1 つ前のパッチ版を使っているケースを検証） | 誤り 0 件、見逃し 1 件以下 |
+| P0-21 | **外部判定率の実測（50 サイト）**: プラットフォーム／コア版／プラグイン検出数／プラグイン版特定／PHP 版／サーバ版 を集計 | 8.1 の見込み値を実測で置き換える（**この数字が企画の説得力になる**） |
+| P0-22 | アセット結合・遅延読み込み系プラグイン導入サイトでの検出落ちの程度 | 落ち方を把握し、`readme.txt` 補完の効果を測る |
+
+### 16.3 体制
+
+| 役割 | 人数 | 内容 |
+| --- | --- | --- |
+| 実装（データ基盤） | 1 | 収集・正規化・DB・API |
+| 実装（拡張・画面） | 1（兼任可） | MV3 拡張、サイドパネル、一覧画面 |
+| 検証 | 0.2 | PoC の精度測定、誤検知の人手確認 |
+| 法務・規約確認 | 外部 1 回 | **データライセンス（CC-BY-4.0 等）の出典表示**、第三者サイトを調べる行為の妥当性、名誉毀損・免責文言、異議申立ての運用（19 章） |
+| 意思決定 | 1 | スコープ（公開範囲）の判断、有償 API の契約可否 |
+
+### 16.4 概算費用
+
+| 項目 | 目安 |
+| --- | --- |
+| ソフトウェア | **0 円**（OSS と公開 API のみ） |
+| インデックス配信 | **0 円**（Cloudflare Pages / GitHub Releases。公開リポジトリの配信は無償枠で足りる） |
+| 収集バッチ | **0 円**（GitHub Actions。公開リポジトリは実行時間の無料枠が大きい） |
+| 一覧ダッシュボード | MVP は**ローカル実行（0 円）**。公開 Web 版は運用コストが発生するため v2 以降 |
+| 有償 API・データベース契約 | **なし**（WPScan / Patchstack は不採用） |
+| Chrome Web Store 登録 | 5 USD（1 回のみ） |
+| ドメイン（任意） | 年 1,000〜2,000 円。`*.pages.dev` を使えば 0 円 |
+| 人的コスト | PoC 0.5 人月、MVP 2 人月、v1 3 人月（1〜2 名） |
+| **持続性の原資** | 広告・課金なしの場合、**自分の時間が唯一の原資**。データ更新が止まると誤情報を配り続けるため、自動化と「鮮度表示」で運用を軽くする（22 章） |
+
+---
+
+## 17. 不明点・事前に確認したいこと（ここが本企画の前提）
+
+> **Q1〜Q4 は 2026-10-29 に回答済み**（17.1）。残る確認事項を 17.2 に、こちらの仮置き前提を 17.3 に示す。
+
+### 17.1 回答済み（2026-10-29）
+
+| # | 質問 | **回答** | 確定した設計影響 |
+| --- | --- | --- | --- |
+| **Q1** | 誰が使うか | **不特定多数（広く公開）** | Chrome Web Store 公開が前提。プライバシーポリシー・免責・単一目的の説明が必須。**無料提供なので有償データは使えない** |
+| **Q2** | 調べる対象 | **第三者のサイトも含む** | パッシブ検出を徹底。**名誉毀損・信用毀損への備え（表現の統一・根拠明示・異議申立て窓口）が必須**（19 章） |
+| **Q3** | 予算 | **出せない。かつ外部にも無料で提供する** | **WPScan / Patchstack / Wordfence は不採用**（BYOK も不可）。WordPress プラグインの修正版は CVE 本文解析＋CPE で代替（4.3）。運用はゼロ円構成（22 章） |
+| **Q4** | 優先エコシステム | **PHP/Composer ＋ WordPress ＋ JS ライブラリで MVP** | Shopify は v1 以降へ移動（3.1 を更新済み） |
+| **Q24** | 自サイトの Site Health 読み取り（6.4） | **採用する（v1 必須）** | PHP の版数が確定し、**無効化中のプラグインも含めた全数**が取れる。CWS の説明文に「自分が管理する WordPress サイトの診断」と明記する（20.1） |
+
+
+### 17.2 未回答（続けて確認したいこと）
+
+| # | 質問 | なぜ必要か |
+| --- | --- | --- |
+| **Q5** | 「一覧」の粒度はどれですか | (a) CVE 単位（情報の網羅性重視）／(b) パッケージ×バージョン単位（対応判断重視）／(c) 資産単位（自社の棚卸し重視）。既定は (a) 一覧＋(c) 資産ビューの 2 画面を用意する案 |
+| **Q6** | Shopify で本当に見たいのは何ですか | テーマ／アプリ／決済／読み込み JS。**アプリの脆弱性は外部から原理的に不可視**なので、期待値を合わせる必要がある |
+| **Q7** | 認証が必要なサイト（管理画面）も対象にしますか | 対象なら「ログイン中に限り管理画面を読む」機能が必要（v2）。対象外なら拡張の限界として明記 |
+| **Q8** | 日本語要約に LLM を使ってよいですか | コストと幻覚リスク。既定は「JVN に日本語があればそれを使い、無ければ原文＋要約しない」。LLM を使うなら「AI 要約（未検証）」と明示 |
+| **Q9** | 通知は必要ですか（Slack / メール / なし） | v1 のスコープに影響 |
+| **Q10** | 既存の MV3 拡張の構成・配布方法を流用してよいですか | 流用できれば UI と権限の実装が半減。別アカウント・別ストア公開の可否も確認 |
+| **Q11** | 判定の「赤」が何件出たら困りますか（ノイズ許容度） | しきい値（スコア 70）と確度下限の調整に必要。「赤は月 5 件まで」など目標があれば合わせる |
+| **Q12** | 既存の脆弱性管理（Jira / スプレッドシート / なし）はありますか | 連携方式（CSV 出力／API／チケット起票）が変わる |
+| **Q13** | 配布方法の詳細（**Chrome Web Store で確定**。デベロッパー名・公開時期・段階公開の有無） | 審査期間とポリシー対応の計画に必要 |
+| **Q14** | 「緑＝安全」と受け取られたときの責任範囲をどう定めますか | 免責文言・利用規約・UI の表現を最初に決める（後から変えると利用者の印象が悪化） |
+| **Q15** | **運営主体は個人か法人か**（屋号・デベロッパー名） | CWS のデベロッパー表示、問い合わせ窓口、将来の課金や広告の有無で扱いが変わる |
+| **Q16** | **サイト所有者からの異議申立て（訂正・掲載停止の依頼）をどう受けますか** | 公開サービスでは必須。受付メールアドレス、3 営業日以内の初回応答、掲載停止の判断基準を決める必要がある |
+| **Q17** | 「赤」の表現をどこまで強くしますか | 第三者のサイトに「危険」と断定すると信用毀損の論点が出る。**既定は「要確認（推定）」**にする想定だが、表現の合意が必要 |
+| **Q18** | テレメトリ（利用状況・クラッシュ）を取りますか | 取るなら CWS のデータ使用開示とプライバシーポリシーに記載が必要。**既定は「取らない」** |
+| **Q19** | 名称「サイト脆弱性チェッカー」の既存サービス・商標調査 | 公開するとブランドになる。同名・類似名の調査が必要（**「WordPress」を含めない方針は 20.3 で確定済み**） |
+| **Q20** | **プライバシーポリシー・利用規約・免責文言を誰が作りますか** | 予算 0 円なら雛形＋自己レビューになるが、**「保証しない」「誤検知があり得る」「異議申立ての窓口」**は必須記載 |
+| **Q21** | サポート対応の範囲（問い合わせにどこまで答えるか） | 無料・少人数で無限のサポートは不可能。**「不具合報告のみ」「セキュリティ相談は受け付けない」**等を規約に明記 |
+| **Q22** | 英語対応を v1 に入れますか | 不特定多数に公開すると国外利用者も入る。UI 文言・プライバシーポリシーの英語版の有無 |
+| **Q23** | ソースコードを公開（OSS）しますか | 公開リポジトリは GitHub Actions の無料枠が大きく、CWS 審査でも透明性が有利。一方でシグネチャの模倣リスクがある |
+| **Q24** | ~~自サイトでログイン中の Site Health 読み取り（6.4）を入れてよいですか~~ → **17.1 で「採用」に確定** | — |
+| **Q25** | **PHP の版数が分からない第三者のサイトは「灰」でよいですか** | 灰が多いと「使えない」印象になるが、推測で断定するほうが危険。運用上どこまで許容するか |
+| **Q26** | 「更新すべき」に**どこまで含めますか**（JS ライブラリ・Web サーバ・DB まで） | 対象を広げるほど指摘は増える。既定は **PHP / WordPress コア / プラグイン / テーマ / JS ライブラリ**、サーバは「参考」 |
+| **Q27** | 「**パッチ更新で済む**」ものと「**ブランチ移行が必要**」なものを分けますが、**推奨の強さ**は変えますか | 例: パッチは「今すぐ」、ブランチ移行は「計画的に」。現場のリリース計画に合わせたい |
+| **Q28** | **共用レンタルサーバで PHP のパッチ版を選べない**場合（提供元が 8.3.26 のまま等）はどう表示しますか | 「自分では直せない」ケースの案内（ホスティングへ依頼）を出すか決める |
+
+### 17.3 こちらで仮置きした前提（違えば指摘してください）
+
+1. 配布は **Chrome Web Store で無料公開**（v1 の関門）。開発中は unpacked で自分用に常用する。
+2. 対象は**第三者のサイトも含む**（公開情報として閲覧できる範囲）。能動スキャンは行わない。
+3. データは**無償・再配布可能なものだけ**を保存・配信する（WPScan / Patchstack は不採用、BYOK も行わない）。
+4. 対応は **PHP/Composer ＋ WordPress ＋ JS ライブラリ**を MVP とする。
+5. 判定は**ローカル照合**（閲覧 URL をサーバへ送らない）。
+6. 技術スタックは **Python（uv）+ FastAPI + SQLite→PostgreSQL ＋ MV3 拡張**。
+7. 日本語 UI。英語は切替で提供。
+
+---
+
+## 18. 決定事項と未決事項
+
+### 18.1 決定事項
+
+| 日付 | 決定 | 理由 |
+| --- | --- | --- |
+| 2026-10-29 | 検出はパッシブ（L1）を中心とし、能動スキャンは行わない | 相手サイトへの負荷、法的リスク、Chrome Web Store ポリシーの 3 点 |
+| 2026-10-29 | データのコアは NVD / OSV / KEV / EPSS / JVN / endoflife.date | 無償かつ再配布可能。MVP を 0 円で成立させるため |
+| 2026-10-29 | ~~WPScan / Patchstack は BYOK かつ非保存~~ → **v0.2 で撤回（不採用）** | 不特定多数への無料提供では規約上「サービスへの組込み」に当たるため |
+| 2026-10-29 | バージョン未特定は「緑」ではなく「灰（判定不能）」 | 誤った安心を与えないため |
+| 2026-10-29 | 拡張の権限は `activeTab` + `scripting` を既定 | `<all_urls>` を避けて審査と信頼性を確保するため |
+| 2026-10-29 | 全件同期は API ではなくダンプ＋差分（OSV GCS、NVD 期間指定、EPSS CSV） | レート制限と鮮度の両立 |
+| 2026-10-29 | **WPScan / Patchstack / BYOK を廃止** | 不特定多数への無料提供では規約上「サービスへの組込み」に当たるため（Q1・Q3） |
+| 2026-10-29 | **WordPress プラグインの修正版は CVE 本文解析＋CPE で取得** | 無償・再配布可能なデータだけで成立させるため（Q3・4.3） |
+| 2026-10-29 | **第三者のサイトも対象。ただしパッシブ検出のみ** | Q2。追加リクエストはユーザー操作起点・1 サイト最大 5 件 |
+| 2026-10-29 | **拡張にシークレット（API トークン）を持たせない** | 公開配布では漏洩リスクを構造的に消すため |
+| 2026-10-29 | **表現を「推定」「要確認」に統一し、異議申立て窓口を設ける** | 誤検知が第三者の信用毀損になり得るため（19 章） |
+| 2026-10-29 | **判定は 2 軸（軸A 既知脆弱性／軸B ライフサイクル）**。EOL は単独で黄以上 | 「プラグインだけ見て緑」を防ぐ（7.1・7.3）（v0.3） |
+| 2026-10-29 | **検査対象は PHP / WordPress コア / プラグイン / テーマ / JS ライブラリ**（＋サーバは参考） | PHP 8.1 のまま WP を最新にしているサイトを正しく指摘するため（7.2）（v0.3） |
+| 2026-10-29 | **自サイトは Site Health 読み取りを v1 で実装**（Q24 承認済み） | PHP の版数は外部からほぼ見えないため（6.4）（v0.3・v0.6 で確定） |
+| 2026-10-29 | **「見えなかったもの」を必ず列挙する**（鉄則 5） | 灰を隠すと「緑＝安全」の誤解を生むため（7.6）（v0.3） |
+| 2026-10-29 | **「直し方の段階」（パッチ／ブランチ移行／メジャー／削除）を判定して表示する** | EOL だけでは“今日消せるリスク”を取りこぼすため（7.4）（v0.4） |
+| 2026-10-29 | **修正版はブランチ単位で保持**（`affected.branch`）＋ 製品のリリース履歴 `release` を持つ | PHP は同じ CVE でも 8.2.x / 8.3.x / 8.4.x で修正版が違うため（7.4・11 章）（v0.4） |
+| 2026-10-29 | **並び順は「パッチ未適用」→「EOL・ブランチ移行」→「メジャー遅れ」** | 一番安く消せるリスクを先に消すため（13.1）（v0.4） |
+| 2026-10-29 | **外部だけで分かる範囲を数字で明示する**（コア 85〜95%、プラグイン 30〜60%、PHP 20〜40%、DB 0%） | 「全部分かる」と誤解されると、判定不能を見落とさせる（8 章）（v0.5） |
+| 2026-10-29 | **PHP は Site Health を本命、外部検出は補助**と位置づける | 外部 20〜40% では EOL 指摘の主役にならないため（6.4・8.1）（v0.5） |
+
+### 18.2 未決事項
+
+| # | 未決の内容 | 決定期限 | 決め方 |
+| --- | --- | --- | --- |
+| U1 | 配布方法の詳細（Q13）※利用者は「不特定多数・CWS 公開」で確定 | Phase 1 | 意思決定者 |
+| U2 | ~~WPScan / Patchstack の契約可否~~ → **不要で確定**（不採用）。代わりに「**CVE 本文解析の精度が目標に届くか**」が新たな未決 | Phase 0 | P0-11・P0-13 の実測で判断 |
+| U3 | 日本語要約に LLM を使うか（Q8） | Phase 1 設計時 | 「JVN 優先・LLM は明示」を既定案として試す |
+| U4 | スコア式の重み（CVSS 8 倍、KEV +15 など） | Phase 2 | PoC の誤検知率を見て調整 |
+| U5 | Shopify の扱い（Q6） | Phase 1 設計時 | 期待値の合意 |
+| U6 | ~~管理画面ログイン時の棚卸し~~ → **Site Health 読み取りとして v1 で実装**（6.4）。残る論点は CWS 説明文の書き方 | Phase 1 | 6.4 の設計で確定 |
+| U7 | 通知先と頻度（Q9） | Phase 2 | 運用負荷で判断 |
+| U8 | `webRequest` によるヘッダ取得を入れるか | Phase 2 | 権限追加の費用対効果で判断 |
+| U9 | **PHP 不明サイトを灰でよいか（Q25）／対象コンポーネントの範囲（Q26）／推奨の強さ（Q27）／パッチ版を選べない共用サーバの扱い（Q28）** | Phase 1 開始前 | 回答待ち |
+
+---
+
+## 19. 公開・無料提供に伴う法的／表現上の要件（v0.2 追加）
+
+不特定多数への無料公開は、技術より**法務と表現**のほうが難所になる。以下は「弁護士の見解」ではなく、**設計で先に潰しておける論点**の整理である。
+
+### 19.1 論点と対策
+
+| 論点 | 何が問題になり得るか | 本企画の対策 |
+| --- | --- | --- |
+| **不正アクセス禁止法** | アクセス制御を回避する行為（ログイン試行、推測攻撃、禁止されたURLへの到達） | 認証情報を一切扱わない。**公開ページと公開ファイルの GET のみ**。ユーザー操作起点・レート制限・`robots.txt` 遵守 |
+| **各サイトの利用規約**（スクレイピング禁止等） | 拡張が勝手に大量アクセスすると規約違反 | 追加リクエストは**ユーザーが明示的に押したときだけ**・1サイト最大 5 件。**サーバ側で他人のサイトを代理取得しない**（リクエストはユーザーのブラウザから出る＝閲覧の補助） |
+| **名誉毀損（刑法230条）／不正競争防止法（営業誹謗）** | 誤検知で第三者のサイトを「危険」と表示すると、信用を毀損し得る | ①表現を「推定」「可能性」に統一（19.2）②根拠・判定時刻・データ日付を必ず併記 ③**判定基準を公開** ④**異議申立て窓口**（19.3）⑤「緑＝安全」と言わない |
+| **個人情報保護法** | 閲覧 URL をサーバへ送ると個人情報（閲覧履歴）に該当し得る | **既定でサーバ送信しない**（照合はローカル）。テレメトリは取らない（Q18） |
+| **著作権・データライセンス** | CC-BY-4.0 の出典表示漏れ | ライセンス画面を必須機能に（4.2） |
+| **Chrome Web Store ポリシー** | 権限過多・単一目的違反・リモートコードでリジェクト | 20 章のチェックリスト |
+| **責任の範囲** | 「安全と言ったのに被害が出た」 | 免責文言＋「保証しない」の常時表示（Q14・Q20） |
+
+> **推奨**: 予算 0 円でも、**公開直前に一度だけ法務相談（1〜2 時間）**を入れる。ここを飛ばすと、公開後の異議申立てや削除依頼で後手に回る。
+
+### 19.2 表現ガイドライン（UI 文言を統一する）
+
+| ❌ 使わない | ✅ 使う |
+| --- | --- |
+| このサイトは危険です | 要確認の項目があります（**推定**） |
+| 脆弱性があります | このバージョンに既知の脆弱性が**報告されています**（推定バージョン 5.9.8） |
+| 安全です | **検出できた範囲では**該当なし（安全性を保証するものではありません） |
+| ハッキングされます／攻撃できます | 悪用が確認されています（CISA KEV に掲載） |
+| 古いプラグインです | サポート終了（2026-12-31）／修正版 5.9.9 が公開されています |
+| このサイトは◯◯の脆弱性がある | このサイトは ◯◯ を使用している**可能性があります**（確度: 中） |
+
+- **サイト名・URL を添えて断定的な評価を書かない**。判定は「その時点の推定」であることを、コピー機能で出力するテキストにも入れる。
+
+### 19.3 異議申立て（サイト所有者向けの窓口）
+
+| 項目 | 決めること |
+| --- | --- |
+| 受付 | メールアドレス＋フォーム（公開ページ）。拡張の設定からもリンク |
+| **本人確認** | **ドメイン所有確認を必須**にする（メールの `admin@`／DNS TXT／指定パスへのファイル設置） |
+| 初回応答 | **3 営業日以内**（KPI に設定済み） |
+| 対応 | 根拠（CVE・シグネチャ）を提示 → 誤りなら**シグネチャ／マッピングを修正**し、拡張のインデックスを更新 |
+| 悪用対策 | 誰でも掲載停止を要求できると、**脆弱性の隠蔽に使われる**。所有確認が取れない申立ては「反論の掲載」に留める |
+| 記録 | 申立て・回答・修正内容を記録（公開ポリシーに沿って統計のみ公表） |
+
+---
+
+## 20. Chrome Web Store 公開要件チェックリスト（v0.2 追加）
+
+| # | 要件 | 対応 |
+| --- | --- | --- |
+| 1 | **単一目的（single purpose）** | 「閲覧中サイトの技術構成と既知脆弱性を表示する」に限定。一覧ダッシュボードは**拡張に含めない**（別のローカルアプリ／Web とする） |
+| 2 | **最小権限** | `activeTab` / `scripting` / `storage` / `sidePanel` / `alarms` のみ。`<all_urls>` と `webRequest` は要求しない（10.2） |
+| 3 | **プライバシーポリシー** | 公開 URL を用意。**「URL をサーバへ送らない」「テレメトリなし」**を明記 |
+| 4 | データ使用の開示 | 収集するデータを CWS のフォームで申告（既定は「収集しない」） |
+| 5 | **リモートコードの禁止** | CDN から JS を読まない。`eval` / `new Function` を使わない。MV3 の既定 CSP を維持 |
+| 6 | 説明文・スクリーンショット・サポート連絡先 | 「何をするか」「何をしないか（能動スキャンしない）」を明記。**誤解を招く表現を避ける**（19.2） |
+| 7 | デベロッパー登録 | 5 USD、二段階認証、連絡先の検証 |
+| 8 | 審査で聞かれそうな質問 | 「なぜ第三者のサイトを見るのか」「追加リクエストの内容と回数」「データをどこへ送るか」に即答できるようにする |
+| 9 | 異議申立ての導線 | 拡張の設定画面から窓口へリンク（19.3） |
+| 10 | 更新フロー | 審査に数日かかる前提で、**インデックス更新は拡張の再審査なしで行える**設計（データは配信側で更新） |
+
+> **重要**: 脆弱性情報を扱う拡張は「セキュリティ」カテゴリで目立つ一方、**誤検知がそのまま第三者の不利益になる**。CWS の説明文でも「推定である」「保証しない」を明記しておくと、後のトラブル時に説明が立つ。
+
+---
+
+### 20.1 CWS の説明文（案）
+
+**拡張の名前**: **サイト脆弱性チェッカー**（11 文字。Manifest V3 の `short_name` は 12 文字以内なので、`name` も `short_name` も同じ値を使える）
+**英語表記**: Site Vulnerability Checker
+※ **「WordPress」を名前に含めない**理由は 20.3。名前の代わりに**説明文の先頭**で WordPress に言及する。
+
+**短い説明（132 文字以内）**
+
+> 開いているサイトの技術構成（WordPress・PHP・JSライブラリ）を推定し、既知の脆弱性とサポート終了を「更新すべきもの」として表示します。自分が管理するWordPressなら管理画面から正確に読み取れます。
+
+**詳細説明（骨子）**
+
+1. **何をするか**
+   - いま開いているページに**すでに表示・読み込みされている情報**（HTML の meta、読み込み済みリソースの URL）から、WordPress・プラグイン・テーマ・PHP・JS ライブラリを推定します。
+   - 推定したバージョンを、端末内に持つ脆弱性インデックスと照合し、**「更新すべきもの」**を重要度順に表示します。
+   - 自分が管理者としてログイン中の WordPress では、「ツール → サイトヘルス → 情報」に**表示されている値**（PHP のバージョン、有効・無効すべてのプラグインとそのバージョン、データベースのバージョン）を読み取り、より正確に判定します。
+2. **何をしないか**
+   - 能動的なスキャン（ポートスキャン、ディレクトリ探索、ログイン試行、攻撃コードの送信）は**行いません**。
+   - **第三者のサイトの管理画面は読みません**。認証を突破する機能はありません。
+   - 閲覧 URL・ページ内容・Site Health の内容を**サーバへ送信しません**（照合は端末内）。
+   - リモートコードを読み込みません（MV3 の CSP を維持）。
+3. **データの出典**: NVD、GitHub Advisory Database（CC-BY-4.0）、CISA KEV、EPSS、JVN iPedia、WordPress.org、php.net、endoflife.date。アプリ内にライセンス表示があります。
+4. **免責**: 判定は公開情報に基づく**推定**です。サイトの安全性を保証するものではありません。誤りを見つけた場合は窓口までご連絡ください。
+
+**審査で聞かれそうな質問と回答（先に用意しておく）**
+
+| 想定質問 | 回答 |
+| --- | --- |
+| なぜ第三者のサイトの情報を読むのか | 公開ページに表示されている技術情報を、**閲覧者の理解を助ける目的**で解析しているだけ。追加リクエストはユーザーが明示的に押したときのみ・1 サイト最大 5 件・GET のみ |
+| なぜ認証後のページを読むのか | **自分が管理するサイトの診断機能**。ユーザーが既に開いている画面の表示値を読むだけで、認証を突破しない。投稿・ユーザー・設定値は読まない |
+| データをどこへ送るか | 送らない。照合は端末内のインデックスで行う（通信は自前のインデックス配信のみ） |
+| 収集する個人情報はあるか | ない。テレメトリも取らない |
+| リモートコードを読み込むか | 読み込まない（`eval` / `new Function` / CDN 読み込みなし） |
+
+### 20.2 プライバシーポリシーに書くこと
+
+| 区分 | 記載内容 |
+| --- | --- |
+| **収集しない情報** | 閲覧 URL、ページ本文、アカウント情報、Site Health の内容、IP アドレス |
+| 端末内に保存する情報 | 判定結果のキャッシュ、設定（自動判定の ON/OFF 等）、インデックスの版番号 |
+| 外部通信 | 自前の静的インデックス配信のみ（**URL や判定結果を含めない**） |
+| 第三者提供 | なし |
+| データの出典・ライセンス | CC-BY-4.0（GitHub Advisory Database）等の出典表示（4.2） |
+| 問い合わせ・異議申立て | 窓口メールアドレス、ドメイン所有確認の方法、初回応答 3 営業日（19.3） |
+
+### 20.3 名称と商標（v0.8 追加）
+
+**結論: 製品名・拡張名・ドメインに「WordPress」「WP」を入れない。** 当初案の「WordPress 脆弱性チェッカー」は、次の理由で採用しない。
+
+WordPress Foundation の商標ポリシー（2026-10-29 に確認）:
+
+> Permission from the WordPress Foundation is required to use the WordPress or WordCamp name or logo as part of any project, product, service, domain name, or company name.
+>
+> All other WordPress-related businesses or projects can use the WordPress name and logo to **refer to and explain** their services, but **they cannot use them as part of a product, project, service, domain name, or company name** and they cannot use them in any way that suggests an affiliation with or endorsement by the WordPress Foundation or the WordPress open source project.
+>
+> For example, … “XYZ Themes, the world’s best WordPress themes,” but cannot call itself “The WordPress Theme Portal.” … “Managed WordPress Hosting” instead use “Hosting for WordPress.”
+>
+> Under no circumstances is it permitted to use WordPress or WordCamp as part of a domain name or top-level domain name.
+>
+> Please do not use “WP” in any way that confuses people.
+
+| ❌ 製品名・ドメインに使う | ✅ 説明で言及する |
+| --- | --- |
+| WordPress 脆弱性チェッカー | **サイト脆弱性チェッカー** — WordPress・PHP・プラグインの脆弱性をチェック |
+| 脆弱性チェッカー WP | サイト脆弱性チェッカー（**WordPress サイト対応**） |
+| `wpvulnchecker.com` | `vulncheck.example`（ドメインに WordPress / WP を入れない） |
+| W ロゴをアイコンに使う | ロゴは説明ページ内の参照に留める |
+
+- どうしても名前に入れたい場合、ポリシーが推奨する形は **「◯◯ for WordPress」**（例: 「サイト脆弱性チェッカー for WordPress」）。ただし本企画は **PHP / JS ライブラリも対象**なので、名前に WordPress を置くと**対象範囲を誤解させる**。名前に入れない方が有利。
+- 将来、課金・広告を入れると**商用利用**になり、**Automattic の独占ライセンス**の確認が必要（無料公開の範囲では不要）。
+- CWS の審査でも商標侵害はリジェクト理由になるため、**名前は早い段階で固定する**（Q19 の調査とセット）。
+
+---
+
+## 21. 公開後の品質維持（精度検証と改善サイクル）（v0.2 追加）
+
+無料・少人数で公開すると、**「作って終わり」が最大のリスク**になる。品質を保つ仕組みを先に入れる。
+
+| 仕組み | 内容 | 頻度 |
+| --- | --- | --- |
+| **シグネチャの回帰テスト** | WordPress サイト 30 件・静的サイト 10 件の「正解データ」を固定し、シグネチャ変更時に判定結果が変わらないか自動テスト | 変更のたび（CI） |
+| **標本調査** | ランダムに 20 サイトを抽出し、赤判定を人手で検証。誤検知率を記録 | 月 1 回 |
+| **誤検知フィードバック** | 拡張の「これは違う」ボタン → 匿名でシグネチャ名だけ送る（URL は送らない設計も可） | 随時 |
+| **異議申立ての集計** | 申立ての理由を分類し、シグネチャ・文言・しきい値に反映 | 月 1 回 |
+| **データ鮮度の監視** | 各ソースの最終取得成功時刻を記録し、24 時間を超えたら**拡張側で警告表示**＋自分へ通知 | 日次（自動） |
+| **取得失敗の通知** | GitHub Actions の失敗をメール／Slack へ | 即時 |
+| **しきい値の見直し** | 赤の件数が多すぎる／少なすぎる場合に `score` の重みを調整（7.5） | 四半期 |
+
+- **改善の優先順位**は「誤検知（赤の誤り）＞ 未検出 ＞ 機能追加」。第三者に迷惑がかかるのは誤検知であるため。
+
+---
+
+## 22. ゼロ円運用の構成（v0.2 追加）
+
+### 22.1 全体像
+
+**「サーバを立てない」**のがゼロ円運用の要点。バッチで静的 JSON を作り、それを配るだけにする。
+
+| 要素 | 使うもの | 費用 | 注意 |
+| --- | --- | --- | --- |
+| 収集バッチ | GitHub Actions（cron） | 0 円（公開リポジトリは標準ランナーの無料枠が大きい） | **差分同期にして 30 分以内**に収める |
+| データ保管 | リポジトリ or GitHub Releases | 0 円 | インデックスは gzip で 20MB 以下（9 章） |
+| 配信 | GitHub Releases / Cloudflare Pages | 0 円 | `Cache-Control` とバージョン番号で差分配信 |
+| NVD API キー | 無料申請 | 0 円 | キーは GitHub Secrets に置く |
+| 監視 | Actions の失敗通知＋ヘルスチェック JSON | 0 円 | 鮮度をデータに埋め込む |
+| ダッシュボード | ローカル実行（MVP） | 0 円 | 公開 Web 版は v2 |
+| Chrome Web Store | 登録料のみ | 5 USD（1 回） | 審査に数日 |
+
+### 22.2 「止まらない」ための設計
+
+1. **取れなかったら前回値を維持**し、`fetched_at` を正直に残す（古いデータを新しいふりにしない）。
+2. **鮮度をデータに埋め込む**。3 日以上更新が無ければ拡張が「データが古い可能性があります」と表示する。
+3. **冪等にする**。`raw_hash` が同じレコードはスキップし、実行時間とコストを抑える。
+4. **部分更新で前進する**。1 ソースが落ちても他は更新し、失敗は失敗として記録する。
+
+### 22.3 コストが発生する分岐点（事前に知っておく）
+
+| 状況 | 発生するコスト |
+| --- | --- |
+| 利用者が数千人規模 | 配信帯域（Cloudflare Pages の無料枠内なら 0 円） |
+| 公開 Web ダッシュボードを出す | ホスティング・DB で月数千円〜 |
+| 有償脆弱性データを導入 | **規約上、無料公開と両立しない**（4 章） |
+| 法務相談を入れる | 1〜2 時間の相談料（公開前に推奨） |
+
+---
+
+## 23. 変更点（v0.2 / v0.3）
+
+| # | 項目 | v0.1 | **v0.2** | 理由 |
+| --- | --- | --- | --- | --- |
+| 1 | 利用者・配布 | 自分 1 名・unpacked | **不特定多数・Chrome Web Store で無料公開** | Q1 |
+| 2 | 対象サイト | 自社中心 | **第三者のサイトも含む**（パッシブ限定） | Q2 |
+| 3 | WPScan / Patchstack | BYOK で利用 | **不採用（BYOK も廃止）** | 規約上「自社サービスへの組込み」に当たる。Q3 |
+| 4 | WordPress プラグインの修正版 | WPScan `fixed_in`（BYOK） | **CVE 本文の「before X」解析 ＋ NVD CPE ＋ WordPress.org Plugin API の slug↔表示名辞書**（4.3） | Q3 |
+| 5 | 予算 | 月数千円＋有償 API 見積 | **0 円**（静的配信＋GitHub Actions） | Q3 |
+| 6 | MVP 対象 | WordPress / PHP / JS / Shopify | **WordPress / PHP / JS ライブラリ**（Shopify は v1） | Q4 |
+| 7 | 拡張のシークレット | ローカルプロキシに保持 | **一切持たない**（通信は自前インデックスのみ） | 公開配布では漏洩リスクをゼロにする |
+| 8 | 追加した章 | — | **19（法務・表現）／20（CWS 要件）／21（品質維持）／22（ゼロ円運用）／4.2（ライセンス）／4.3（抽出方式）** | 公開・無料・第三者サイト化に伴い必須 |
+| 9 | KPI | 判定精度中心 | **修正版特定率 50%・異議申立て応答 3 営業日**を追加 | 新しい方式と公開サービスに必要な指標 |
+| 10 | 主リスク | 誤検知・未検出 | **＋第三者の信用毀損リスク（誤検知の社会的影響）** | Q2 |
+
+### v0.3 の変更点（「プラグインだけを調べたいわけではない」への対応）
+
+| # | 項目 | v0.2 | **v0.3** | 理由 |
+| --- | --- | --- | --- | --- |
+| 11 | 判定の考え方 | 既知脆弱性が中心（EOL は加点要素） | **2 軸（軸A 既知脆弱性／軸B ライフサイクル）**。**EOL 単独で黄以上** | 「PHP 8.1 のまま WordPress だけ最新」を緑にしない（7.1・7.3） |
+| 12 | 検査対象 | プラグインが中心 | **PHP / WordPress コア / プラグイン / テーマ / JS ライブラリ /（サーバ）** を個別に判定 | 指摘の単位を「コンポーネント × 軸」に変更（7.2） |
+| 13 | PHP の版数の取得 | `X-Powered-By` などパッシブのみ | **6.4 Site Health 読み取りを v1 で追加**（自サイトの PHP・DB・全プラグインが確定） | 外部からはほぼ見えないという現実への対処 |
+| 14 | UI の主役 | 「該当する脆弱性」の一覧 | **「更新すべきもの」**。構成と「判定できなかったもの」は別枠 | 利用者の知りたいことは「何を更新すればいいか」（13.1） |
+| 15 | 限界の伝え方 | 灰の説明 | **「見えなかったもの」を必ず列挙**（鉄則 5） | 見えていないものを緑で塗りつぶさない（7.6） |
+| 16 | 追加した節 | — | **6.4（Site Health）／7.1〜7.7（2 軸モデル・コンポーネント表・EOL ルール）** | — |
+
+### v0.4 の変更点（「パッチ版に上げないと直らない脆弱性」への対応）
+
+| # | 項目 | v0.3 | **v0.4** | 理由 |
+| --- | --- | --- | --- | --- |
+| 17 | パッチレベルの CVE | EOL と CVE を別々に評価 | **同一ブランチ内のパッチ未適用を明示**（例: PHP 8.3.26 → 8.3.28） | 「サポート中だから安全」ではない。公表された脆弱性はパッチ版で直る（7.4） |
+| 18 | 表示する内容 | 修正版のバージョンまで | **直し方の分類**（パッチ更新／ブランチ移行／メジャー更新／削除／ベンダ確認）を出す（F15） | 「何をすればいいか」が分からないと動けない |
+| 19 | 並び順 | 赤 → 黄 | **①今すぐ（パッチで消える）→ ②計画（ブランチ移行・メジャー）** | 一番安く消せるリスクを後回しにしない（13.1） |
+| 20 | データ構造 | `affected.fixed` のみ | **`affected.branch`** と **`release`（製品のリリース履歴・修正した CVE）** を追加 | PHP は同じ CVE でも 8.2.x / 8.3.x / 8.4.x で修正版が違う（11 章） |
+| 21 | データ源 | NVD / OSV / KEV / EPSS / EOL | **＋ php.net のリリース・チェンジログ／`php-src` アドバイザリ** | 「どの CVE が、どの版で直ったか」が必要（4 章） |
+| 22 | 追加した節・項目 | — | **7.4／F15／P0-19・P0-20／Q27・Q28** | — |
+
+### v0.5 の変更点（「結局どれくらい判定できるのか」への回答）
+
+| # | 項目 | v0.4 | **v0.5** | 理由 |
+| --- | --- | --- | --- | --- |
+| 23 | 限界の書き方 | 「限界」を箇条書き | **8 章を「外部からどれだけ判定できるか」に再構成**し、コンポーネント別の**期待値を数字**で提示（コア 85〜95%、プラグイン 30〜60%、PHP 20〜40%、DB 0%） | 期待値を先に合わせないと、公開後に「使えない」と言われる |
+| 24 | PHP の位置づけ | 外部検出も同列 | **Site Health が本命、外部検出は補助（20〜40%）** | 数字を出した結果、主役を入れ替える必要があった |
+| 25 | `readme.txt` の評価 | 確度 0.60（「配布中の最新版」） | **0.80（同梱ファイルなので稼働版と一致しやすい）** | 仕様の理解を修正（8.1 の補完根拠になる） |
+| 26 | 1 サイトあたりの姿 | なし | **検出 5〜12 件／更新すべき 1〜3 件／灰 2〜5 件**を明記（8.4） | 営業・説明・受け入れ基準に使う |
+| 27 | PoC | P0-20 まで | **P0-21（50 サイトの外部判定率実測）／P0-22（最適化系プラグインの影響）** | 見込み値を実測で置き換える |
+
+### v0.6 の変更点（Q24 の承認を受けて）
+
+| # | 項目 | v0.5 | **v0.6** | 理由 |
+| --- | --- | --- | --- | --- |
+| 28 | Site Health 読み取り（Q24） | 未回答 | **採用で確定（v1 必須）** | 承認。PHP の版数と無効プラグインまで確定できる |
+| 29 | CWS の提出物 | チェックリストのみ | **説明文（短い説明・詳細の骨子）と想定 Q&A、プライバシーポリシーの記載事項**を追加（20.1・20.2） | 審査対策と、公開後の「思ってたのと違う」予防 |
+| 30 | 未決事項 | Q24〜Q28 | **Q25〜Q28 の 4 件**（Q24 は解決） | — |
+
+### v0.7 の変更点（PoC の実装と初回実測）
+
+| # | 項目 | v0.6 | **v0.7** | 理由 |
+| --- | --- | --- | --- | --- |
+| 31 | PoC | 未着手 | **P0-21（外部判定の巡回・集計・HTML 可視化）と P0-18（Site Health 解析）を Python で実装**。単体テスト 12 件・`ruff` クリーン | 「見込み値」を実測と正解データで置き換えるため |
+| 32 | 実測 | 見込みのみ | **n=4 の実測で PHP・サーバのバージョンは 0%**（8.5）。コア版は 2/2 で 100% | PHP を外部検出に頼る設計が成立しないことを確認 |
+| 33 | KPI | PHP 外部特定 30% 以上 | **実測次第で「記録のみ（目標値を設けない）」に変更する方針** | 達成不能な目標を掲げると設計判断を誤る |
+| 34 | 拡張（JS） | 実装イメージのみ | **判定ロジックは Python で確定し、`tests/fixtures/` を正解データとして JS へ移植**する方針を README に明記 | この環境に Node が無く、JS を実行検証できないため |
+
+### v0.8 の変更点（名称の決定）
+
+| # | 項目 | v0.7 | **v0.8** | 理由 |
+| --- | --- | --- | --- | --- |
+| 35 | 名称 | 仮称 VulnLens | **サイト脆弱性チェッカー**（英: Site Vulnerability Checker／内部名 `site_vuln_checker`） | 「何をするアプリか」が名前で分かるようにする |
+| 36 | 「WordPress 脆弱性チェッカー」案 | 検討 | **不採用**（製品名に WordPress を使えない） | 商標ポリシーで製品名・ドメインへの使用は許可制（20.3） |
+| 37 | 追加した節 | — | **20.3 名称と商標**（ポリシーの引用と NG/OK 表） | CWS 審査のリジェクト回避と、後からの改名コスト削減 |
+
+### v0.9 の変更点（ディレクトリ・パッケージ・CLI 名の統一）
+
+| # | 項目 | v0.8 | **v0.9** | 理由 |
+| --- | --- | --- | --- | --- |
+| 38 | ディレクトリ | `vuln-lens` | **`site-vuln-checker`** | 旧名（VulnLens）の残存をなくし、名前を一箇所で揃える |
+| 39 | Python パッケージ | `vulnlens_poc` | **`site_vuln_checker`** | 同上。`uv_build` がプロジェクト名から自動で導出する形に合わせる |
+| 40 | CLI | `vulnlens-survey` / `vulnlens-report` | **`svc-survey` / `svc-report`**（SVC = Site Vulnerability Checker） | 短く、名前に由来する |
+| 41 | User-Agent | `VulnLens-PoC/0.1` | **`SVC-PoC/0.1`** | 取得先に名乗る文字列も新名称に合わせる |
+
+---
+
+## 24. 参考資料
+
+### データソース（本日 2026-10-29 に確認したもの）
+
+- NVD Developers — https://nvd.nist.gov/developers/vulnerabilities （API 2.0 の仕様。レート制限は PoC で実測）
+- OSV API — https://google.github.io/osv.dev/api/ （レート制限なし、HTTP/1.1 でレスポンス 32MiB 上限）
+- OSV データソースと GCS ダンプ — https://google.github.io/osv.dev/data/ （`all.zip`、`<ECOSYSTEM>/all.zip`、`modified_id.csv`。**Packagist を含む**ことを確認）
+- CISA Known Exploited Vulnerabilities Catalog — https://www.cisa.gov/known-exploited-vulnerabilities-catalog （Vendor 一覧に `PHP Group` を確認）
+- FIRST EPSS — https://www.first.org/epss/ （日次更新、CSV と API、GitHub リポジトリ）
+- JVN iPedia / MyJVN API — https://jvndb.jvn.jp/ （本日 503。仕様は PoC で再確認）
+- endoflife.date — https://endoflife.date/ （EOL API。仕様は PoC で確認）
+- PHP Supported Versions — https://www.php.net/supported-versions.php （8.2 のセキュリティサポートは 2026-12-31 まで）
+- **GitHub Advisory Database** — https://github.com/advisories （**CC-BY-4.0**、WordPress プラグインの CVE を多数収録。本文が「The ◯◯ WordPress plugin before X.Y.Z ...」形式であることを確認）
+- **WordPress.org Plugin API** — https://api.wordpress.org/plugins/info/1.2/ （slug → 表示名・最新版。無償）
+- WPScan API — https://wpscan.com/api/ （**v0.2 で不採用**。規約「永続保存・キャッシュ・スクレイピング禁止、組込みは Enterprise 契約」の確認記録として）
+- Patchstack Docs — https://docs.patchstack.com/
+- Retire.js — https://github.com/RetireJS/retire.js （Apache-2.0、Chrome 拡張の参考実装）
+
+### 技術仕様
+
+- Chrome 拡張 Manifest V3 `webRequest` — https://developer.chrome.com/docs/extensions/reference/api/webRequest （MV3 では `webRequestBlocking` が使えないこと）
+- Chrome 拡張 Side Panel — `chrome.sidePanel`（既存の MV3 拡張と同方式）
+- OSV Schema — https://ossf.github.io/osv-schema/
+
+### 関連する既存プロジェクト
+
+- 既存の MV3 拡張（非公開）… MV3 + サイドパネル + `chrome.scripting` の実装パターン
+- [kotoba-desktop](https://github.com/AkiraMatsumoto-github/kotoba-desktop) … Python（uv / pydantic / pytest / ruff）、`docs/design.md` と `docs/plan.md` のドキュメント運用
+
+---
+
+## 付録 A. 用語
+
+| 用語 | 意味 |
+| --- | --- |
+| CVE | 脆弱性の共通識別子（`CVE-2026-0001`） |
+| CVSS | 脆弱性の深刻度スコア（0〜10）。v3.1 と v4.0 がある |
+| CWE | 脆弱性の種類（CWE-79: XSS など） |
+| KEV | CISA が「悪用を観測した」と認定した脆弱性のカタログ |
+| EPSS | 30 日以内に悪用される確率の予測値（0〜1） |
+| purl | パッケージの一意な識別子（`pkg:composer/vendor/name@1.2.3`） |
+| CPE | 製品・バージョンを表す NVD の識別子。表記揺れが多い |
+| OSV | OSS 向けの脆弱性フォーマット／DB。バージョン範囲を持てる |
+| BYOK | Bring Your Own Key。利用者自身の API トークンを使う方式（**本企画では v0.2 で不採用**） |
+| MV3 | Chrome 拡張の Manifest V3。Service Worker とリモートコード禁止が特徴 |
+| SBOM / CycloneDX | ソフトウェア部品表とその標準形式 |
+
+## 付録 B. 改訂履歴
+
+| 版 | 日付 | 内容 |
+| --- | --- | --- |
+| 0.1 | 2026-10-29 | 初版ドラフト。データソースの実在確認、検出方式、判定式、不明点 14 件を整理 |
+| **0.2** | 2026-10-29 | **Q1〜Q4 の回答を反映**。不特定多数・無料公開・第三者サイト対応に伴い、WPScan/Patchstack/BYOK を廃止、CVE 本文解析と CPE による代替方式（4.3）、ライセンス（4.2）、法務・表現（19）、CWS 要件（20）、品質維持（21）、ゼロ円運用（22）を追加。Shopify は v1 へ |
+| **0.3** | 2026-10-29 | **「プラグインだけを調べたいわけではない」を反映**。判定を **2 軸（既知脆弱性／ライフサイクル）**に再定義し、EOL を単独で黄以上に。検査対象を **PHP / WordPress コア / プラグイン / テーマ / JS ライブラリ /（サーバ）**へ拡張（7.1〜7.3）。PHP 版数の決定打として **Site Health 読み取り（6.4）** を v1 に追加。UI を「更新すべきもの」中心に再構成（13.1）。限界の列挙を鉄則に（7.6） |
+| **0.4** | 2026-10-29 | **「サポート中でもパッチ版に上げないと直らない脆弱性」を反映**。**7.4「直し方の段階」**を追加（パッチ更新／ブランチ移行／メジャー更新／削除／ベンダ確認）。`affected.branch` と `release`（製品リリース履歴）を追加し、php.net のチェンジログ等から **CVE→ブランチ別修正版**を作る方針に。UI の並びを「①今すぐ（パッチ）→②計画（ブランチ移行）」に変更 |
+| **0.5** | 2026-10-29 | **「結局どれくらい外部から判定できるのか」に回答**。8 章を再構成し、コンポーネント別の期待値を数字で提示（WPコア 85〜95%／プラグイン 30〜60%・版は検出分の 50〜70%／PHP 20〜40%／DB 0%）。**PHP は Site Health を本命、外部検出は補助**と明記。`readme.txt` の確度を 0.80 に修正。1 サイトあたりの現実的な姿（検出 5〜12 件・更新すべき 1〜3 件・灰 2〜5 件）と、P0-21（50 サイト実測）・P0-22 を追加 |
+| **0.6** | 2026-10-29 | **Q24（Site Health 読み取り）を採用で確定**。6.4 に「何を取り出すか（フィールド対応表）」「代替手段との比較」「できないこと」を追記。**20.1 CWS 説明文（案）と想定 Q&A、20.2 プライバシーポリシーの記載事項**を追加。未決は Q25〜Q28 の 4 件 |
+| **0.7** | 2026-10-29 | **PoC を実装**（`site-vuln-checker`）。外部判定（detect）・礼儀正しい取得（fetch）・巡回 CLI（survey）・HTML 可視化（report）・Site Health 解析（sitehealth）。テスト 12 件・ruff クリーン。**n=4 の初回実測を 8.5 に追加**（コア版 100%／PHP・サーバ版 0%）。JS は Node 不在のため Python を正解データとして移植する方針 |
+| **0.8** | 2026-10-29 | **名称を「サイト脆弱性チェッカー」に決定**（英: Site Vulnerability Checker）。当初案「WordPress 脆弱性チェッカー」は、**WordPress Foundation の商標ポリシーが製品名・サービス名・ドメイン名への使用を許可制**としているため不採用とし、**20.3 名称と商標**を追加。manifest・比較表・CWS 説明文を新名称に更新 |
+| **0.9** | 2026-10-29 | **ディレクトリ・Python パッケージ・CLI・User-Agent を新名称に統一**（`site-vuln-checker` / `site_vuln_checker` / `svc-survey`・`svc-report` / `SVC-PoC`）。旧名 `vulnlens` の残存を解消 |
