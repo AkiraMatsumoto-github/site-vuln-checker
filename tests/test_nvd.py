@@ -40,11 +40,15 @@ def test_min_interval() -> None:
     assert nvd.min_interval("key") == pytest.approx(0.6), "キーありは 50 req/30s"
 
 
-def test_api_key_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_api_key_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # リポジトリ直下の .env に依存しないよう、存在しないパスを明示する
+    missing = tmp_path / "none.env"
+
     monkeypatch.setenv("NVD_API_KEY", "  abc  ")
-    assert nvd.api_key_from_env() == "abc"
+    assert nvd.api_key_from_env(missing) == "abc"
+
     monkeypatch.setenv("NVD_API_KEY", "   ")
-    assert nvd.api_key_from_env() is None
+    assert nvd.api_key_from_env(missing) is None
 
 
 def test_api_key_from_dotenv(

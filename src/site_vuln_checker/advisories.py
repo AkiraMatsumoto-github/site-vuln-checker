@@ -49,6 +49,24 @@ def normalize_slug(text: str) -> str:
     return _SLUG_RE.sub("-", text.strip().lower()).strip("-")
 
 
+#: 前方一致で拾うための最小長。短すぎる slug（"seo" など）は誤爆するので対象外。
+MIN_PREFIX_MATCH = 6
+
+
+def _starts_with_word(text: str, prefix: str) -> bool:
+    """``text`` が ``prefix`` で始まるか（単語境界で区切る）。"""
+    return text == prefix or text.startswith(f"{prefix}-")
+
+
+def is_affected(version: str, advisory: Advisory) -> bool:
+    """``version`` が勧告の影響範囲に入るか。"""
+    if advisory.affected_below and compare_versions(version, advisory.affected_below) < 0:
+        return True
+    return bool(
+        advisory.affected_upto and compare_versions(version, advisory.affected_upto) <= 0
+    )
+
+
 def version_key(version: str) -> tuple[tuple[int, object], ...]:
     """比較用のキー。``1.2`` / ``1.2.0`` / ``5.9.9.1`` を数値として比べる。
 
@@ -71,12 +89,19 @@ def compare_versions(left: str, right: str) -> int:
 
 @dataclass(frozen=True)
 class Advisory:
-    """1 件の勧告（CVE など）。"""
+    """1 件の勧告（CVE など）。
+
+    影響範囲の表し方は 2 通りある（NVD の本文に合わせる）。
+
+    - ``affected_below`` … 「before 5.9.9」= 5.9.9 未満が影響
+    - ``affected_upto``  … 「3.29.11 以下」「up to, and including, 3.29.11」= その版以下が影響
+    """
 
     id: str
     name: str
     slug: str | None = None
     affected_below: str | None = None
+    affected_upto: str | None = None
     fixed: str | None = None
     cvss: float | None = None
     kev: bool = False
@@ -95,6 +120,7 @@ class Advisory:
             name=str(data.get("name") or ""),
             slug=data.get("slug"),
             affected_below=data.get("affected_below"),
+            affected_upto=data.get("affected_upto"),
             fixed=data.get("fixed"),
             cvss=float(data["cvss"]) if data.get("cvss") is not None else None,
             kev=bool(data.get("kev") or False),
@@ -109,6 +135,7 @@ class Advisory:
             "name": self.name,
             "slug": self.slug,
             "affected_below": self.affected_below,
+            "affected_upto": self.affected_upto,
             "fixed": self.fixed,
             "cvss": self.cvss,
             "kev": self.kev,
@@ -135,12 +162,25 @@ class AdvisoryIndex:
         return list(self._by_key.get(normalize_slug(name_or_slug), ()))
 
     def advisories_for(self, finding: Finding) -> list[Advisory]:
-        """Finding に該当しうる勧告。slug と表示名の両方で引く。"""
-        found = self.lookup(finding.name)
+        """Finding に該当しうる勧告を探す。
+
+        1. slug の完全一致
+        2. 表示名の完全一致（正規化後）
+        3. 表示名の**前方一致**（CVE 本文の名前にはマーケティング名が続くことが多い）
+        """
+        slug = normalize_slug(finding.name)
+
+        found = self.lookup(slug)
         if found:
             return found
-        name_key = normalize_slug(finding.name)
-        return [a for a in self.advisories if normalize_slug(a.name) == name_key]
+
+        exact = [a for a in self.advisories if normalize_slug(a.name) == slug]
+        if exact:
+            return exact
+
+        if len(slug) >= MIN_PREFIX_MATCH:
+            return [a for a in self.advisories if _starts_with_word(normalize_slug(a.name), slug)]
+        return []
 
     @classmethod
     def from_dict(cls, data: dict, source_path: Path | None = None) -> AdvisoryIndex:
@@ -222,12 +262,7 @@ def judge(analysis: Analysis, index: AdvisoryIndex) -> list[Judgement]:
                 )
             continue
 
-        affected = [
-            advisory
-            for advisory in advisories
-            if advisory.affected_below
-            and compare_versions(finding.version, advisory.affected_below) < 0
-        ]
+        affected = [advisory for advisory in advisories if is_affected(finding.version, advisory)]
 
         if not affected:
             if advisories:

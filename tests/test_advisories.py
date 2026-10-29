@@ -13,8 +13,10 @@ from site_vuln_checker.advisories import (
     LEVEL_NONE,
     LEVEL_RED,
     LEVEL_YELLOW,
+    Advisory,
     AdvisoryIndex,
     compare_versions,
+    is_affected,
     judge,
     normalize_slug,
     summarize,
@@ -114,3 +116,42 @@ def test_index_is_serializable() -> None:
     restored = AdvisoryIndex.from_dict(index.to_dict())
     assert [a.id for a in restored.advisories] == [a.id for a in index.advisories]
     assert restored.lookup("contact-form-7")[0].cvss == 9.8
+
+
+@pytest.mark.parametrize(
+    ("version", "expected"),
+    [("1.4.1", True), ("1.4.2", True), ("1.4.3", False), ("2.0", False)],
+)
+def test_is_affected_upto(version: str, expected: bool) -> None:
+    """「X 以下」は境界を含む（NVD の "up to, and including, X"）。"""
+    advisory = Advisory(id="CVE-X", name="Example", affected_upto="1.4.2")
+    assert is_affected(version, advisory) is expected
+
+
+def test_affected_upto_is_red_and_reports_unknown_fix() -> None:
+    finding = Finding("plugin", "wplp-cookie-consent", "1.4.2", 0.85, (), active=True)
+    judgements = judge(Analysis(url="https://example.com/", findings=[finding]), _index())
+    assert len(judgements) == 1
+    judgement = judgements[0]
+    assert judgement.level == LEVEL_RED, "CVSS 9.8 なので赤"
+    assert judgement.component == "wplp-cookie-consent"
+    assert judgement.action == "修正版不明（ベンダに確認）", "「X 以下」だけでは修正版が分からない"
+
+
+def test_affected_upto_excludes_later_version() -> None:
+    finding = Finding("plugin", "wplp-cookie-consent", "1.4.3", 0.85, (), active=True)
+    judgements = judge(Analysis(url="https://example.com/", findings=[finding]), _index())
+    assert [j.level for j in judgements] == [LEVEL_NONE]
+
+
+def test_prefix_match_handles_marketing_names() -> None:
+    """CVE 本文の名前は「正式名 - 説明」になりがちなので前方一致で拾う。"""
+    index = _index()
+    found = index.advisories_for(Finding("plugin", "wplp-cookie-consent", None, 0.6))
+    assert [a.id for a in found] == ["CVE-2026-90004"]
+
+
+def test_short_slug_does_not_prefix_match() -> None:
+    """短すぎる slug は前方一致させない（誤爆よけ）。"""
+    index = _index()
+    assert index.advisories_for(Finding("plugin", "seo", None, 0.6)) == []
