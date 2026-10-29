@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .advisories import AdvisoryIndex, Judgement, judge, summarize
 from .detect import Analysis, analyze
 from .fetch import FetchError, PoliteFetcher
 
@@ -32,6 +33,7 @@ class SiteResult:
     elapsed_ms: int | None = None
     error: str | None = None
     analysis: Analysis | None = None
+    judgements: list[Judgement] = field(default_factory=list)
 
 
 @dataclass
@@ -82,7 +84,13 @@ class Survey:
             "plugins_versioned": len(versioned),
             "plugin_version_rate": round(len(versioned) / len(plugins), 3) if plugins else 0.0,
             "plugins_per_site": round(len(plugins) / len(analyses), 2) if analyses else 0.0,
+            "levels": self.level_counts(),
         }
+
+    def level_counts(self) -> dict[str, int]:
+        """判定の内訳（赤/黄/灰/該当なし）。索引を渡していなければ全て 0。"""
+        all_judgements = [j for result in self.results for j in result.judgements]
+        return summarize(all_judgements)
 
     # --- 出力 -------------------------------------------------------------
     def to_json(self) -> dict[str, object]:
@@ -96,6 +104,7 @@ class Survey:
                     "elapsed_ms": r.elapsed_ms,
                     "error": r.error,
                     "analysis": r.analysis.to_dict() if r.analysis else None,
+                    "judgements": [j.to_dict() for j in r.judgements],
                 }
                 for r in self.results
             ],
@@ -132,7 +141,14 @@ def read_urls(path: Path) -> list[str]:
     return urls
 
 
-def run(urls: list[str], *, delay: float, timeout: float, limit: int | None) -> Survey:
+def run(
+    urls: list[str],
+    *,
+    delay: float,
+    timeout: float,
+    limit: int | None,
+    index: AdvisoryIndex | None = None,
+) -> Survey:
     survey = Survey()
     targets = urls[:limit] if limit else urls
     with PoliteFetcher(delay=delay, timeout=timeout) as fetcher:
@@ -148,6 +164,7 @@ def run(urls: list[str], *, delay: float, timeout: float, limit: int | None) -> 
                 print(f"  fail  {url}  {exc}")
                 continue
             analysis = analyze(page.final_url, page.html, page.headers)
+            judgements = judge(analysis, index) if index else []
             survey.add(
                 SiteResult(
                     url=url,
@@ -155,9 +172,12 @@ def run(urls: list[str], *, delay: float, timeout: float, limit: int | None) -> 
                     status=page.status,
                     elapsed_ms=page.elapsed_ms,
                     analysis=analysis,
+                    judgements=judgements,
                 )
             )
-            print(f"  ok    {url}  ({page.elapsed_ms} ms, {len(analysis.findings)} 件)")
+            reds = sum(1 for j in judgements if j.level == "red")
+            extra = f", 赤 {reds} 件" if index else ""
+            print(f"  ok    {url}  ({page.elapsed_ms} ms, {len(analysis.findings)} 件{extra})")
     return survey
 
 
@@ -174,6 +194,12 @@ def print_summary(summary: dict[str, object]) -> None:
         f"版の特定率 {summary['plugin_version_rate']:.0%}"
         f"（{summary['plugins_versioned']}/{summary['plugins_total']}）"
     )
+    levels = summary.get("levels") or {}
+    if any(levels.values()):
+        print(
+            f"判定: 赤 {levels.get('red', 0)} / 黄 {levels.get('yellow', 0)} / "
+            f"灰 {levels.get('gray', 0)} / 該当なし {levels.get('none', 0)}"
+        )
     print("※ 企画書 8.1 の見込み値と比べる。件数が少ないので参考値として扱う")
 
 
@@ -187,6 +213,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--delay", type=float, default=1.0, help="同一ホストへの間隔（秒）")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument(
+        "--advisories",
+        type=Path,
+        default=None,
+        help="勧告索引の JSON。指定すると赤/黄/灰の判定まで行う",
+    )
     args = parser.parse_args(argv)
 
     urls = read_urls(args.urls)
@@ -194,8 +226,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"URL がありません: {args.urls}")
         return 1
 
+    index = AdvisoryIndex.load(args.advisories) if args.advisories else None
+    if index:
+        print(f"勧告索引: {args.advisories}（{len(index.advisories)} 件）")
+
     print(f"{len(urls)} 件を対象に取得します（delay={args.delay}s）")
-    survey = run(urls, delay=args.delay, timeout=args.timeout, limit=args.limit)
+    survey = run(urls, delay=args.delay, timeout=args.timeout, limit=args.limit, index=index)
 
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "survey.json").write_text(
