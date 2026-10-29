@@ -21,6 +21,7 @@
 | **P0-21** | 外部からどれだけ判定できるかの実測（対応サイトを巡回し、検出率を集計） | `site_vuln_checker/survey.py` |
 | **P0-18** | WordPress「サイトヘルス → 情報」の DOM 解析（PHP 版数・全プラグイン・DB の取得） | `site_vuln_checker/sitehealth.py` |
 | 可視化 | 検出したプラグイン・版・確度・根拠を HTML レポートにする | `site_vuln_checker/report.py` |
+| **判定（軸A）** | 勧告索引（JSON）と突き合わせて **赤 / 黄 / 灰** を決める | `site_vuln_checker/advisories.py` |
 
 > **JS は未検証**: この環境には Node が入っていないため、まず判定ロジックを Python で固め、
 > `tests/fixtures/` を**正解データ**として拡張（Manifest V3 / JS）へ移植する。
@@ -39,11 +40,48 @@ uv run ruff check .
 # 外部判定の実測（robots.txt を尊重し、1 サイト 1 リクエスト・既定 1 秒間隔）
 uv run svc-survey --urls sites.sample.txt --limit 5 --delay 1.0
 
+# 勧告索引を渡すと、赤 / 黄 / 灰 の判定まで行う
+uv run svc-survey --urls sites.sample.txt --limit 5 --delay 1.0 `
+  --advisories tests/fixtures/advisories.json
+
 # 結果を HTML に可視化する
 uv run svc-report
 ```
 
 出力は `out/` に置く（`survey.json` / `summary.json` / `report.html`）。
+
+## 判定（赤 / 黄 / 灰）
+
+`--advisories` に**勧告索引の JSON** を渡すと、検出したプラグイン・テーマと突き合わせて判定します。
+
+```json
+{
+  "generated_at": "2026-10-29T00:00:00Z",
+  "advisories": [
+    {
+      "id": "CVE-2025-90001",
+      "name": "Contact Form 7",
+      "slug": "contact-form-7",
+      "affected_below": "5.9.9",
+      "fixed": "5.9.9",
+      "cvss": 9.8,
+      "kev": true,
+      "source": "nvd"
+    }
+  ]
+}
+```
+
+| 判定 | 条件 |
+| --- | --- |
+| 🔴 赤 | 影響する勧告に **KEV** がある、または **CVSS 9.0 以上** |
+| 🟡 黄 | 影響する勧告がある（上記以外） |
+| ⚪ 灰 | **バージョンが不明**（勧告の履歴があるものだけ表示） |
+| — | 勧告はあるが修正版以降（該当なし） |
+
+- `affected_below` は NVD の説明文にある「before 5.9.9」をそのまま使う想定です（企画書 4.3）
+- **バージョンが分からないものを緑にはしません**（企画書 7.6 の鉄則）
+- 索引は `tests/fixtures/advisories.json`（**合成データ**）で試せます
 
 ## 初回の実測結果（n=4 / 2026-10-29）
 

@@ -1,0 +1,37 @@
+{
+  "note": "テスト用の合成データです。実在の CVE ではありません（ID は未割当の範囲を使っています）。",
+  "generated_at": "2026-10-29T00:00:00Z",
+  "advisories": [
+    {
+      "id": "CVE-2025-90001",
+      "name": "Contact Form 7",
+      "slug": "contact-form-7",
+      "affected_below": "5.9.9",
+      "fixed": "5.9.9",
+      "cvss": 9.8,
+      "kev": true,
+      "source": "nvd",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-90001"
+    },
+    {
+      "id": "CVE-2025-90002",
+      "name": "Elementor",
+      "slug": "elementor",
+      "affected_below": "3.20.0",
+      "fixed": "3.20.0",
+      "cvss": 6.1,
+      "kev": false,
+      "source": "nvd"
+    },
+    {
+      "id": "CVE-2024-90003",
+      "name": "Hello Dolly",
+      "slug": "hello-dolly",
+      "affected_below": "1.8.0",
+      "fixed": "1.8.0",
+      "cvss": 5.0,
+      "kev": false,
+      "source": "nvd"
+    }
+  ]
+}

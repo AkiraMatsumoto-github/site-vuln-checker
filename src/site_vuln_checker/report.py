@@ -115,6 +115,52 @@ def _section(title: str, findings: list[dict]) -> str:
     )
 
 
+_LEVEL_LABELS = {
+    "red": ("🔴 赤", "#c53030"),
+    "yellow": ("🟡 黄", "#b7791f"),
+    "gray": ("⚪ 灰", "#718096"),
+    "none": ("—", "#2f855a"),
+}
+
+
+def _judgement_rows(judgements: list[dict]) -> str:
+    """赤/黄/灰の判定を表にする。"""
+    rows = []
+    for judgement in judgements:
+        label, color = _LEVEL_LABELS.get(str(judgement.get("level")), ("?", "#555"))
+        advisories = judgement.get("advisories") or []
+        details = (
+            "<br>".join(
+                f"<code>{_esc(a.get('id'))}</code> CVSS {_esc(a.get('cvss') or '—')}"
+                f"{' <b>KEV</b>' if a.get('kev') else ''}"
+                for a in advisories
+            )
+            or '<span class="empty">該当なし</span>'
+        )
+        note = judgement.get("note")
+        note_html = f'<br><span class="empty">{_esc(note)}</span>' if note else ""
+        rows.append(
+            "<tr>"
+            f'<td><span class="tag" style="color:{color};border-color:{color}">{label}</span></td>'
+            f"<td><b>{_esc(judgement.get('component'))}</b></td>"
+            f"<td>{_esc(judgement.get('version') or '版不明')}</td>"
+            f"<td>{_esc(judgement.get('action'))}{note_html}<br>{details}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _judgement_section(judgements: list[dict]) -> str:
+    if not judgements:
+        return ""
+    return (
+        "<h3>更新すべきもの（判定）</h3>"
+        "<table><thead><tr><th>判定</th><th>コンポーネント</th><th>版</th>"
+        "<th>該当する勧告 / 次の行動</th></tr></thead><tbody>"
+        f"{_judgement_rows(judgements)}</tbody></table>"
+    )
+
+
 def _site_card(site: dict) -> str:
     url = site.get("url")
     analysis = site.get("analysis")
@@ -152,6 +198,7 @@ def _site_card(site: dict) -> str:
         '<div class="card">'
         f'<div class="url">{_esc(url)}</div>'
         f'<div class="meta">{_esc(meta)}</div>'
+        + _judgement_section(site.get("judgements") or [])
         + _section("プラットフォーム", by_kind.get("platform", []))
         + _section("コア", by_kind.get("core", []))
         + _section("プラグイン", by_kind.get("plugin", []))
@@ -177,6 +224,7 @@ def _percent(value: object) -> str:
 def render(payload: dict) -> str:
     summary: dict = payload.get("summary", {})
     sites: list[dict] = payload.get("sites", [])
+    levels: dict = summary.get("levels") or {}
 
     kpis = "".join(
         [
@@ -189,6 +237,9 @@ def render(payload: dict) -> str:
             _kpi(_percent(summary.get("php_version_rate")), "PHP 版の特定率"),
             _kpi(_percent(summary.get("plugin_version_rate")), "プラグイン版の特定率"),
             _kpi(str(summary.get("plugins_per_site", 0)), "プラグイン数/サイト"),
+            _kpi(str(levels.get("red", 0)), "赤（要対応）"),
+            _kpi(str(levels.get("yellow", 0)), "黄（更新推奨）"),
+            _kpi(str(levels.get("gray", 0)), "灰（判定不能）"),
         ]
     )
     cards = "".join(_site_card(site) for site in sites)
