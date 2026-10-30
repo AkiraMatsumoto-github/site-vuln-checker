@@ -62,9 +62,12 @@ jobs:
             uv run svc-ingest --days 14 --merge --out "$INDEX_PATH"
           else
             uv run svc-ingest --out "$INDEX_PATH"
-            uv run svc-ingest --source cpe --products php,wordpress,laravel,symfony,cakephp,django,rails,jekyll \
-              --merge --out "$INDEX_PATH"
           fi
+          # CPE（PHP 本体・フレームワーク・静的サイト）は毎回取り直して足す。
+          # ここを初回だけにすると、後から対象製品を増やしても反映されない。
+          uv run svc-ingest --source cpe \
+            --products php,wordpress,laravel,symfony,cakephp,django,rails,jekyll \
+            --merge --out "$INDEX_PATH"
 
       - name: 悪用実績・悪用確率・EOL を足す
         run: |
