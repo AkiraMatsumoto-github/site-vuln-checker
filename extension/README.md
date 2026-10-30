@@ -17,14 +17,15 @@
 自動で取りに行きます**（初回だけ Chrome がアクセス許可を確認します）。
 
 ```
-https://github.com/AkiraMatsumoto-github/site-vuln-checker/releases/latest/download/advisories.json
+https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json
 ```
 
 索引は `.github/workflows/publish-index.yml` が毎日 03:00 JST に作り直します
-（手元で配信する必要はありません）。画面下に `取得元 github.com` と表示されます。
+（手元で配信する必要はありません）。画面下に `取得元 akiramatsumoto-github.github.io` と表示されます。
 
-> 取得には **`github.com`** と **`*.githubusercontent.com`**（Releases の実体へリダイレクトされる先）への
-> 許可が必要です。初回のクリック時にまとめて求められます。
+> 取得には **`akiramatsumoto-github.github.io`** への許可が必要です（Pages は直配信なので 1 オリジンだけ）。
+> 初回のクリック時に求められます。Releases にも同じファイルを置いていますが、拡張は使いません
+> （Releases は署名付き URL へ 302 するため、リダイレクト先の許可も必要になり CORS で失敗しやすい）。
 
 > 許可しないと索引を取得できません。**閲覧 URL はどこにも送りません**（通信は索引の取得だけ）。
 

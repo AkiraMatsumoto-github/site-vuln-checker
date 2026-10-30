@@ -1,7 +1,7 @@
 name: Publish index
 
-# 索引（advisories.json）を毎日作り直して GitHub Releases に置く。
-# 拡張は https://github.com/.../releases/latest/download/advisories.json を読む（本番の配信元）。
+# 索引（advisories.json）を毎日作り直して **GitHub Pages** に置く（拡張はここを読む）。
+# Releases にも同じファイルを置く（手元で落としたい人・履歴用）。
 
 on:
   workflow_dispatch:
@@ -11,6 +11,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 env:
   INDEX_PATH: out/advisories.json
@@ -21,6 +23,9 @@ jobs:
     name: build & publish
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
 
@@ -84,7 +89,7 @@ jobs:
               sys.exit("EOL 情報がありません")
           PY
 
-      - name: Releases に公開（同じタグに上書き）
+      - name: Releases にも置く（履歴・手元ダウンロード用）
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -96,12 +101,29 @@ jobs:
           fi
           gh release upload "$TAG" "$INDEX_PATH" --clobber
           gh release edit "$TAG" --latest \
-            --notes "更新: $(date -u '+%Y-%m-%d %H:%M UTC') ／ 勧告 $(du -h "$INDEX_PATH" | cut -f1)"
+            --notes "更新: $(date -u '+%Y-%m-%d %H:%M UTC') ／ $(du -h "$INDEX_PATH" | cut -f1)"
 
-      - name: 公開後の確認
+      - name: Pages 用のファイルを用意
         run: |
           set -euo pipefail
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/advisories.json"
-          code=$(curl -sL -o /dev/null -w '%{http_code}' "$url")
-          echo "$url -> HTTP $code"
-          test "$code" = "200"
+          mkdir -p public
+          cp "$INDEX_PATH" public/advisories.json
+          ls -l public
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: 公開後の確認（Pages / Releases の両方）
+        run: |
+          set -euo pipefail
+          for url in \
+            "https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/advisories.json"; do
+            code=$(curl -sL -o /dev/null -w '%{http_code}' "$url")
+            echo "$url -> HTTP $code"
+            test "$code" = "200"
+          done

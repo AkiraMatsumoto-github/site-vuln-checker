@@ -1,27 +1,21 @@
 // 拡張の設定値（URL など）を 1 か所にまとめる。
 //
-// 索引（advisories.json）は **GitHub Releases から取得する**（本番のみ）。
-// URL は利用者に打たせない。取得にはオリジンの許可が要るので、
-// 許可を求めるのは「このサイトを調べる」を押したとき（ユーザー操作）に行う。
+// 索引（advisories.json）は **GitHub Pages から取得する**（本番のみ）。
+// Releases はリダイレクト（302 → 署名付き URL）になるため、拡張の fetch では
+// リダイレクト先の許可も必要になり、CORS で失敗しやすかった。
+// Pages は直配信なので **1 オリジンの許可**だけで済む。
+// URL は利用者に打たせない。許可を求めるのは「このサイトを調べる」を押したとき。
 
 /** 索引の配信元（GitHub Actions が毎日更新する）。 */
-export const RELEASE_INDEX_URL =
-  "https://github.com/AkiraMatsumoto-github/site-vuln-checker/releases/latest/download/advisories.json";
+export const INDEX_URL =
+  "https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json";
 
 /** 取得を試す URL（本番のみ）。 */
-export const INDEX_CANDIDATES = [RELEASE_INDEX_URL];
+export const INDEX_CANDIDATES = [INDEX_URL];
 
-/**
- * 索引の取得に必要なオリジン。
- *
- * GitHub の Releases は **署名付き URL へ 302 リダイレクト**する
- * （``github.com`` → ``release-assets.githubusercontent.com``）。
- * 拡張の fetch はリダイレクト先にもホスト許可が要るため、両方を持つ。
- */
-export const INDEX_ORIGINS = [
-  "https://github.com/*",
-  "https://*.githubusercontent.com/*",
-];
+/** 索引の取得に必要なオリジン（Pages は直配信なので 1 つでよい）。 */
+export const INDEX_ORIGINS = ["https://akiramatsumoto-github.github.io/*"];
+
 
 
 

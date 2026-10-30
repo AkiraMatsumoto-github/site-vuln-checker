@@ -733,7 +733,11 @@ WordPress サイト 10 件を調べたところ、**1 件（10%）が `X-Powered
 
 | 配信元 | 用途 |
 |---|---|
-| `https://github.com/…/releases/latest/download/advisories.json` | 本番のみ（代替なし） |
+| `https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json`（GitHub Pages） | 本番のみ（代替なし） |
+
+> **Releases を使わない理由**: Releases の URL は署名付き URL へ **302 リダイレクト**され、
+> 拡張の `fetch` はリダイレクト先のオリジンにも許可が必要になる。実際に CORS で失敗したため、
+> **直配信の Pages** に切り替えた（許可は 1 オリジンで済む）。
 
 - 取得にはオリジンの許可が要るため、**初回のクリック時**に要求する（2 回目以降は聞かない）
 - 取得に失敗しても**保存済みの索引で判定を続け**、画面に「索引を更新できませんでした」と出す

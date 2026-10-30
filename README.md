@@ -241,11 +241,11 @@ uv run svc-enrich --index out/advisories.json
 
 ### 2. 索引は配信済み（何もしなくてよい）
 
-拡張は **GitHub Releases の索引**を読みます。日次で更新するのは
-`.github/workflows/publish-index.yml` で、手元で配信する必要はありません。
+拡張は **GitHub Pages の索引**を読みます（Releases は署名付き URL へ 302 するため使っていません）。
+日次で更新するのは `.github/workflows/publish-index.yml` で、手元で配信する必要はありません。
 
 ```
-https://github.com/AkiraMatsumoto-github/site-vuln-checker/releases/latest/download/advisories.json
+https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json
 ```
 
 ### 3. 拡張を読み込む
@@ -255,9 +255,9 @@ https://github.com/AkiraMatsumoto-github/site-vuln-checker/releases/latest/downl
 3. **パッケージ化されていない拡張機能を読み込む** → `extension` フォルダを選ぶ
 4. 調べたいサイトを開いてアイコンをクリック → **「このサイトを調べる」**
 
-初回のクリックで、索引の配信元（`github.com` と `*.githubusercontent.com`）と、調べるサイトへの許可を
+初回のクリックで、索引の配信元（`akiramatsumoto-github.github.io`）と、調べるサイトへの許可を
 確認されます。**許可すれば、URL の入力も設定も不要**です。索引は 24 時間たつと「調べる」のタイミングで
-自動更新されます。取得元は画面下に `取得元 github.com` と表示されます。
+自動更新されます。取得元は画面下に `取得元 akiramatsumoto-github.github.io` と表示されます。
 
 > **閲覧したサイトの URL はどこにも送りません**（通信は索引の取得だけです）。
 
