@@ -282,11 +282,17 @@ async function ensureFreshIndex() {
     return { refreshed: true, count: result.count, usedCached: false, url: result.url };
   } catch (error) {
     // 許可が無い・配信が落ちている等。保存済みがあれば黙ってそれを使う。
+    console.warn("索引の更新に失敗しました", error); // 拡張のサービスワーカー画面で確認できる
+    const granted = await chrome.permissions
+      .contains({ origins: [originPattern(expected)] })
+      .catch(() => false);
     return {
       refreshed: false,
       usedCached: hasCached,
       url: stored[INDEX_URL_KEY] ?? null,
       error: String(error?.message ?? error),
+      // 許可が無いのが原因なら、サイドパネル側で許可を取って再試行してもらう
+      needsIndexPermission: !granted,
     };
   }
 }

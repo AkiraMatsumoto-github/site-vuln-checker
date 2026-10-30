@@ -244,12 +244,21 @@ async function inspect({ askPermission = false } = {}) {
   $("status").textContent = "調べています…";
   try {
     if (askPermission) {
-      // サイトの許可（ページの読み取り＋ヘッダ）を先に取る。取れなくても続行する。
-      await askHeaderPermission();
+      // 索引 → サイト の順に許可を取る（索引が無いと判定できないため）
       await ensureIndexPermission();
+      await askHeaderPermission();
     }
 
     let report = await chrome.runtime.sendMessage({ type: "inspect" });
+
+    // 索引を取得できなかった原因が「許可なし」なら、ここで許可を取って再試行
+    if (report?.indexRefresh?.needsIndexPermission) {
+      const pattern = originPattern(INDEX_CANDIDATES[0]);
+      const granted = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
+      if (granted) {
+        report = await chrome.runtime.sendMessage({ type: "inspect" });
+      }
+    }
 
     // このタブを読む許可が無い（アイコンを押さずにパネルを開いた等）→ 許可を取って再試行
     if (report?.needsSitePermission && report.origin) {
@@ -269,10 +278,16 @@ async function inspect({ askPermission = false } = {}) {
       return;
     }
     renderReport(report);
-    // 索引を取りに行って失敗したときだけ、その旨を出す（古い索引で判定は続く）
+    // 索引の取得に失敗したときだけ理由を出す（古い索引で判定は続く）
     const refresh = report.indexRefresh ?? {};
-    $("status").textContent =
-      refresh.error && refresh.usedCached ? "索引を更新できませんでした（前回の索引で判定）" : "";
+    if (refresh.needsIndexPermission) {
+      $("status").textContent =
+        "索引の取得が許可されていません。github.com へのアクセスを許可してから、もう一度お試しください。";
+    } else if (refresh.error && refresh.usedCached) {
+      $("status").textContent = "索引を更新できませんでした（前回の索引で判定）";
+    } else {
+      $("status").textContent = "";
+    }
   } catch (error) {
     $("status").textContent = `失敗しました: ${String(error?.message ?? error)}`;
   } finally {
