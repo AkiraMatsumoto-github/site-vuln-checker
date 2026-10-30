@@ -59,7 +59,7 @@ function judgementItem(judgement, level) {
     if (level === "none") {
       // 該当なしのときは、過去の勧告を**畳んで**出す（同じ CVE の山で誤解させない）
       const details = document.createElement("details");
-      const summary = element("summary", "", `根拠（CVE ${advisories.length} 件）を見る`);
+      const summary = element("summary", "", `過去報告（${advisories.length}件）を見る`);
       details.append(summary, list);
       item.append(details);
     } else {
