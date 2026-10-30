@@ -1,4 +1,4 @@
-name: Publish index
+name: 索引の公開
 
 # 索引（advisories.json）を毎日作り直して **GitHub Pages** に置く（拡張はここを読む）。
 # Releases にも同じファイルを置く（手元で落としたい人・履歴用）。

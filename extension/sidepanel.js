@@ -274,12 +274,30 @@ async function inspectWithPermissions() {
   return report;
 }
 
-/** エラー文言を短くする（画面に出す用）。 */
-function shortReason(message) {
-  return String(message ?? "")
-    .replace(/^TypeError:\s*/, "")
-    .replace(/^Error:\s*/, "")
-    .slice(0, 80);
+/**
+ * 索引の取得エラーを日本語にする。
+ *
+ * `fetch` の失敗は英語（``Failed to fetch`` など）で返ってくるため、
+ * 画面にそのまま出さず、利用者に意味が伝わる日本語に置き換える。
+ */
+function describeIndexError(message) {
+  const text = String(message ?? "");
+
+  const http = /HTTP\s+(\d{3})/i.exec(text);
+  if (http) {
+    const code = http[1];
+    if (code === "404") return "配信元が見つかりません（HTTP 404）";
+    if (code.startsWith("5")) return `配信元で問題が起きています（HTTP ${code}）`;
+    return `配信元が HTTP ${code} を返しました`;
+  }
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(text)) {
+    return "通信できませんでした（許可されていないか、ネットワークに繋がっていません）";
+  }
+  if (/abort|timeout|timed out/i.test(text)) return "時間切れになりました";
+  if (/json|unexpected token/i.test(text)) return "索引の形式が正しくありません";
+  if (text.includes("索引が空です")) return "索引が空でした";
+  if (text.includes("索引を取得できません")) return text; // もともと日本語
+  return "原因を特定できませんでした（詳しくは拡張のコンソールを確認してください）";
 }
 
 async function inspect({ askPermission = false } = {}) {
@@ -314,7 +332,7 @@ async function inspect({ askPermission = false } = {}) {
         "索引の取得が許可されていません。akiramatsumoto-github.github.io へのアクセスを許可してから、もう一度お試しください。";
     } else if (refresh.error) {
       const cached = refresh.usedCached ? "（前回の索引で判定）" : "";
-      $("status").textContent = `索引を更新できませんでした: ${shortReason(refresh.error)}${cached}`;
+      $("status").textContent = `索引を更新できませんでした: ${describeIndexError(refresh.error)}${cached}`;
     } else {
       $("status").textContent = "";
     }

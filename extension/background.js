@@ -19,14 +19,51 @@ const REPORT_KEY = "lastReport";
 const INDEX_KEY = "index";
 const INDEX_URL_KEY = "indexUrl";
 const VERSIONS_KEY = "versions";
+const STATE_VERSION_KEY = "stateVersion";
 const REFRESH_ALARM = "refresh-index";
+
+//: 保存データの形の版。取得元や保存項目を変えたら上げる（更新時に古い状態を捨てる）
+const STATE_VERSION = 2;
 
 //: 入力された製品名 → 検出結果の種別（PHP は言語、WordPress はコア、他はフレームワーク）
 const KIND_BY_PRODUCT = { php: "language", wordpress: "core" };
 
-chrome.runtime.onInstalled.addListener(() => {
+/**
+ * 古い版の保存データを捨てる（再インストールしなくても直るように）。
+ *
+ * - 索引の取得元が今と違う（例: 以前の localhost / Releases）→ 索引を作り直す
+ * - 拒否履歴は、取得元が変わったら無効（もう一度だけ聞き直す）
+ */
+async function migrateStorage(details) {
+  const stored = await chrome.storage.local.get([
+    INDEX_KEY,
+    INDEX_URL_KEY,
+    STATE_VERSION_KEY,
+    "declinedOrigins",
+  ]);
+
+  const expected = INDEX_CANDIDATES[0];
+  const staleSource = stored[INDEX_URL_KEY] && stored[INDEX_URL_KEY] !== expected;
+  if (staleSource) {
+    await chrome.storage.local.remove([INDEX_KEY, INDEX_URL_KEY, "indexUpdatedAt"]);
+  }
+
+  const version = Number(stored[STATE_VERSION_KEY] ?? 0);
+  if (version < STATE_VERSION) {
+    await chrome.storage.local.remove(["declinedOrigins"]);
+    await chrome.storage.local.set({ [STATE_VERSION_KEY]: STATE_VERSION });
+  }
+
+  // 前回の判定結果（別の版のもの）は出さない
+  if (details?.reason === "update" || staleSource) {
+    await chrome.storage.session.remove(REPORT_KEY).catch(() => {});
+  }
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   chrome.alarms.create(REFRESH_ALARM, { periodInMinutes: 1440 });
+  migrateStorage(details).catch(() => {});
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {

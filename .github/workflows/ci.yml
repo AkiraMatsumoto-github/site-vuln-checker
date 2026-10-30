@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test:
-    name: lint & test
+    name: 静的解析とテスト
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -24,14 +24,14 @@ jobs:
       - name: 依存を同期（lock どおり）
         run: uv sync --locked
 
-      - name: Lint
+      - name: 静的解析（ruff）
         run: uv run ruff check .
 
-      - name: Test
+      - name: テスト（pytest）
         run: uv run pytest -q
 
   extension:
-    name: extension (node)
+    name: 拡張（Node）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
