@@ -172,6 +172,7 @@ async function inspectActiveTab() {
     levels: summarizeLevels(judgements),
     indexSize: index ? index.size : 0,
     indexGeneratedAt: index ? index.generatedAt : null,
+    indexUrl: indexRefresh.url ?? null,
     indexRefresh,
     lifecycleSize: index?.lifecycles ? index.lifecycles.size : 0,
     versions,
@@ -263,26 +264,28 @@ function applyVersions(analysis, versions) {
 /**
  * 索引が必要なら取りに行く（「調べる」のたびに呼ばれる）。
  *
- * - 24 時間以内に取れていれば何もしない
- * - 古い／無い場合は候補から取得し直す
+ * - 24 時間以内に取れていて、**取得元が本番と一致**していれば何もしない
+ * - そうでなければ取得し直す（古いローカル配信などから切り替える）
  * - 取得に失敗しても、保存済みの索引があればそれで判定を続ける
  */
 async function ensureFreshIndex() {
+  const expected = INDEX_CANDIDATES[0];
   const stored = await chrome.storage.local.get([INDEX_KEY, INDEX_URL_KEY, "indexUpdatedAt"]);
   const hasCached = Boolean(stored[INDEX_KEY]);
-  if (hasCached && !isIndexStale(stored.indexUpdatedAt)) {
-    return { refreshed: false, usedCached: true };
+  const sameSource = stored[INDEX_URL_KEY] === expected;
+  if (hasCached && sameSource && !isIndexStale(stored.indexUpdatedAt)) {
+    return { refreshed: false, usedCached: true, url: expected };
   }
 
-  const url = stored[INDEX_URL_KEY] ?? INDEX_CANDIDATES[0];
   try {
-    const result = await refreshIndex(url);
-    return { refreshed: true, count: result.count, usedCached: false };
+    const result = await refreshIndex(expected);
+    return { refreshed: true, count: result.count, usedCached: false, url: result.url };
   } catch (error) {
     // 許可が無い・配信が落ちている等。保存済みがあれば黙ってそれを使う。
     return {
       refreshed: false,
       usedCached: hasCached,
+      url: stored[INDEX_URL_KEY] ?? null,
       error: String(error?.message ?? error),
     };
   }
@@ -299,11 +302,9 @@ async function loadIndex() {
   }
 }
 
-/** 索引を取り直す。URL は保存済みのもの、または引数で指定したもの。 */
+/** 索引を取り直す。取得元は本番（``INDEX_CANDIDATES[0]``）のみ。 */
 async function refreshIndex(urlOverride) {
-  const stored = await chrome.storage.local.get(INDEX_URL_KEY);
-  const url = urlOverride ?? stored[INDEX_URL_KEY] ?? INDEX_CANDIDATES[0];
-  if (!url) return { error: "索引の URL が未設定です（設定画面で指定してください）" };
+  const url = urlOverride ?? INDEX_CANDIDATES[0];
 
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) throw new Error(`索引を取得できません（HTTP ${response.status}）`);

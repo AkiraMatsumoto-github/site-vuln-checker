@@ -126,14 +126,21 @@ function renderReport(report) {
   renderNotes(report);
 
   const levels = report.levels ?? {};
-  // 索引の鮮度も出す（自動更新が止まっていると気づけるように）
+  // 索引の鮮度と取得元も出す（本番を向いているか一目で分かるように）
   const generated = report.indexGeneratedAt ? new Date(report.indexGeneratedAt) : null;
   const staleDays = generated ? Math.floor((Date.now() - generated.getTime()) / 86400000) : null;
+  let source = null;
+  try {
+    source = report.indexUrl ? new URL(report.indexUrl).hostname : null;
+  } catch {
+    source = null;
+  }
   const meta = [
     report.scannedAt ? `判定 ${new Date(report.scannedAt).toLocaleString()}` : null,
     generated
       ? `索引 ${report.indexSize ?? 0} 件（${generated.toLocaleDateString()} 生成）`
       : `索引 ${report.indexSize ?? 0} 件`,
+    source ? `取得元 ${source}` : null,
     staleDays !== null && staleDays > 14 ? `⚠ 索引が ${staleDays} 日古い` : null,
     levels.red ? `赤 ${levels.red}` : null,
     levels.yellow ? `黄 ${levels.yellow}` : null,
@@ -216,12 +223,14 @@ async function ensureIndexPermission() {
     .get(["indexUpdatedAt", "indexUrl"])
     .catch(() => ({}));
 
-  const candidates = stored.indexUrl ? [stored.indexUrl] : INDEX_CANDIDATES;
-  for (const url of candidates) {
+  // 索引が無い、または取得元が本番と違う（古いローカル配信など）なら許可を取る
+  const needsPermission =
+    !stored.indexUpdatedAt || stored.indexUrl !== INDEX_CANDIDATES[0];
+
+  for (const url of INDEX_CANDIDATES) {
     const pattern = originPattern(url);
     if (await chrome.permissions.contains({ origins: [pattern] }).catch(() => false)) return true;
-    // 索引をまだ持っていないときだけ聞く（持っているなら今の配信元を使い続ける）
-    if (!stored.indexUpdatedAt) {
+    if (needsPermission) {
       const granted = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
       if (granted) return true;
     }

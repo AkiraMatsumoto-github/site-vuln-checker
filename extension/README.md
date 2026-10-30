@@ -10,31 +10,18 @@
 3. **パッケージ化されていない拡張機能を読み込む** → この `extension` フォルダを選ぶ
 4. ツールバーのアイコンをクリック → サイドパネルが開く
 
-## 索引（advisories.json）を用意する
+## 索引（advisories.json）
 
-拡張は**索引をローカルに持って**照合します。索引の場所は `config.js` に既定値があり、
+拡張は**索引をローカルに持って**照合します。取得元は **GitHub Releases のみ**（`config.js`）で、
 **設定画面はありません**。**「このサイトを調べる」を押したときに、索引が無い／24 時間以上たっていれば
 自動で取りに行きます**（初回だけ Chrome がアクセス許可を確認します）。
 
-```powershell
-cd C:\Users\yahoo\dev\site-vuln-checker
-
-# NVD から索引を作り、KEV / EPSS / EOL を付ける
-uv run svc-ingest --out out/advisories.json
-uv run svc-ingest --source cpe --products php,wordpress,laravel,symfony --merge --out out/advisories.json
-uv run svc-enrich --index out/advisories.json
-uv run svc-eol --out out/advisories.json
-
-# ローカルで配信する（開発中のみ。本番は GitHub Releases を読む）
-python -m http.server 8000
+```
+https://github.com/AkiraMatsumoto-github/site-vuln-checker/releases/latest/download/advisories.json
 ```
 
-既定の読み込み先（`config.js`）:
-
-| 環境 | 候補 |
-|---|---|
-| 開発（unpacked） | `http://localhost:8000/out/advisories.json` → `https://github.com/.../releases/latest/download/advisories.json` |
-| 本番（ストア版） | `https://github.com/.../releases/latest/download/advisories.json` のみ |
+索引は `.github/workflows/publish-index.yml` が毎日 03:00 JST に作り直します
+（手元で配信する必要はありません）。画面下に `取得元 github.com` と表示されます。
 
 > 許可しないと索引を取得できません。**閲覧 URL はどこにも送りません**（通信は索引の取得だけ）。
 

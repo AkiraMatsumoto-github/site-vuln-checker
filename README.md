@@ -239,19 +239,14 @@ uv run svc-enrich --index out/advisories.json
 > なお NVD は 1 ページを大きくすると 503 を返すため、50 件ずつ取得します（数分かかります）。
 
 
-### 2. 索引を配信する（開発時だけ）
+### 2. 索引は配信済み（何もしなくてよい）
 
-本番（Chrome Web Store で配る版）は **GitHub Releases の索引**を読みます。日次で更新するのは
+拡張は **GitHub Releases の索引**を読みます。日次で更新するのは
 `.github/workflows/publish-index.yml` で、手元で配信する必要はありません。
 
-開発中（unpacked）は手元の配信を優先するので、次のコマンドで配信します。
-
-```powershell
-python -m http.server 8000
 ```
-
-> ストアから入れた拡張は `update_url` を持つため、localhost の候補は使いません
-> （`extension/config.js` の `isDevelopment`）。
+https://github.com/AkiraMatsumoto-github/site-vuln-checker/releases/latest/download/advisories.json
+```
 
 ### 3. 拡張を読み込む
 
@@ -260,8 +255,9 @@ python -m http.server 8000
 3. **パッケージ化されていない拡張機能を読み込む** → `extension` フォルダを選ぶ
 4. 調べたいサイトを開いてアイコンをクリック → **「このサイトを調べる」**
 
-初回のクリックで、索引の配信元（`http://localhost:8000`）と調べるサイトへの許可を確認されます。
+初回のクリックで、索引の配信元（github.com）と調べるサイトへの許可を確認されます。
 **許可すれば、URL の入力も設定も不要**です。索引は 24 時間たつと「調べる」のタイミングで自動更新されます。
+取得元は画面下に `取得元 github.com` と表示されます。
 
 > **閲覧したサイトの URL はどこにも送りません**（通信は索引の取得だけです）。
 
