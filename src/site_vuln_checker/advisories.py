@@ -367,9 +367,9 @@ def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | Non
             component=finding.name,
             version=finding.version,
             level=LEVEL_NONE,
-            action="この Version は該当しません",
+            action="この Version には脆弱性は報告されていません",
             advisories=unique,
-            note=f"過去の勧告 {len(unique)} 件はすべて修正済みです",
+            note=f"過去の勧告 {len(unique)} 件は、すべて修正済みです",
         )
 
     fixed_versions = sorted({a.fixed for a in affected if a.fixed}, key=version_key)

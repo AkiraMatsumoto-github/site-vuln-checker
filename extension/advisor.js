@@ -153,9 +153,9 @@ function judgeAdvisories(component, index) {
       component: component.name,
       version: component.version,
       level: LEVEL.NONE,
-      action: "この Version は該当しません",
+      action: "この Version には脆弱性は報告されていません",
       advisories: unique,
-      note: `過去の勧告 ${unique.length} 件はすべて修正済みです`,
+      note: `過去の勧告 ${unique.length} 件は、すべて修正済みです`,
     };
   }
 
