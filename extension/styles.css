@@ -294,3 +294,20 @@ footer {
   background: var(--line);
   color: var(--fg);
 }
+
+button.link {
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #2b6cb0;
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+button.link:disabled {
+  color: var(--green);
+  text-decoration: none;
+  cursor: default;
+}

@@ -78,6 +78,41 @@ function collectEvidence() {
   };
 }
 
+/**
+ * レスポンスヘッダを読む（``X-Powered-By`` / ``Server`` から PHP と Web サーバを推定）。
+ *
+ * PHP の版は**サイトが公開している場合だけ**分かる。実測では 10 サイト中 1 サイトが
+ * ``X-Powered-By: PHP/8.3.36`` を返した。公開していないサイトが大半なので、
+ * 「取れなくても異常ではない」前提で扱う。
+ *
+ * 追加リクエストを避けるため、**利用者がそのサイトの許可を与えたときだけ**、
+ * **HEAD で 1 回**だけ問い合わせる（本文は取得しない）。
+ */
+async function readHeaders(url) {
+  let pattern;
+  try {
+    pattern = `${new URL(url).origin}/*`;
+  } catch {
+    return {};
+  }
+  const granted = await chrome.permissions.contains({ origins: [pattern] }).catch(() => false);
+  if (!granted) return {};
+
+  try {
+    const response = await fetch(url, {
+      method: "HEAD",
+      credentials: "omit",
+      cache: "no-store",
+    });
+    const headers = {};
+    for (const [key, value] of response.headers.entries()) headers[key.toLowerCase()] = value;
+    return headers;
+  } catch {
+    // HEAD を拒否するサーバもある。ヘッダは無くても判定は続けられる。
+    return {};
+  }
+}
+
 async function inspectActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || !/^https?:/i.test(tab.url ?? "")) {
@@ -90,10 +125,12 @@ async function inspectActiveTab() {
   });
   if (!result) throw new Error("ページから情報を取得できませんでした");
 
+  const headers = await readHeaders(result.url);
   const analysis = analyze({
     url: result.url,
     html: result.html,
     resources: result.resources,
+    headers,
   });
   const { versions } = await readVersions();
   applyVersions(analysis, versions);

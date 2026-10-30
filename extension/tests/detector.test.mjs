@@ -94,3 +94,32 @@ test("WordPress でないサイトではプラグインを出さない", () => {
   assert.equal(analysis.findings.filter((item) => item.kind === "plugin").length, 0);
   assert.ok(analysis.notes.includes("プラットフォームを判定できませんでした"));
 });
+
+// --- ヘッダから PHP（任意機能）-----------------------------------------------
+
+test("X-Powered-By があれば PHP の版を読む", () => {
+  const analysis = analyze({
+    url: "https://example.com/",
+    html: "<html><body>hello</body></html>",
+    resources: [],
+    headers: { "x-powered-by": "PHP/8.3.36" },
+  });
+  const php = analysis.findings.find((item) => item.kind === "language");
+  assert.equal(php.name, "php");
+  assert.equal(php.version, "8.3.36");
+  assert.deepEqual(php.evidence, ["header:x-powered-by"]);
+  // 版が分かったので「PHP のバージョンは取得できませんでした」は出さない
+  assert.ok(!analysis.notes.some((note) => note.startsWith("PHP のバージョン")));
+});
+
+test("ヘッダが無ければ PHP は不明のまま（推測しない）", () => {
+  const analysis = analyze({
+    url: "https://example.com/",
+    html: "<html><body>hello</body></html>",
+    resources: [],
+    headers: { server: "nginx" },
+  });
+  assert.equal(analysis.findings.filter((item) => item.kind === "language").length, 0);
+  assert.ok(analysis.notes.some((note) => note.startsWith("PHP のバージョン")));
+});
+

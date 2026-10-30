@@ -227,6 +227,35 @@ async function addVersion() {
   await inspect();
 }
 
+async function grantHeaders() {
+  const info = await chrome.runtime.sendMessage({ type: "versions" }).catch(() => null);
+  if (!info?.origin) {
+    $("status").textContent = "http / https のページを開いてください";
+    return;
+  }
+  const pattern = `${info.origin}/*`;
+  const granted = await chrome.permissions.request({ origins: [pattern] });
+  if (!granted) {
+    $("status").textContent = "許可されませんでした（ヘッダは読めません。入力で代替できます）";
+    return;
+  }
+  $("status").textContent = "このサイトのヘッダを読むようにしました";
+  await inspect();
+}
+
+/** すでに許可済みならボタンを無効にする（許可の状態は permissions が持っている）。 */
+async function refreshHeaderButton() {
+  const info = await chrome.runtime.sendMessage({ type: "versions" }).catch(() => null);
+  if (!info?.origin) return;
+  const granted = await chrome.permissions
+    .contains({ origins: [`${info.origin}/*`] })
+    .catch(() => false);
+  if (granted) {
+    $("grantHeaders").disabled = true;
+    $("grantHeaders").textContent = "ヘッダを読む設定: 有効";
+  }
+}
+
 $("addVersion").addEventListener("click", () => {
   addVersion().catch((error) => {
     $("status").textContent = `失敗しました: ${String(error?.message ?? error)}`;
@@ -235,8 +264,14 @@ $("addVersion").addEventListener("click", () => {
 $("version").addEventListener("keydown", (event) => {
   if (event.key === "Enter") addVersion().catch(() => {});
 });
+$("grantHeaders").addEventListener("click", () => {
+  grantHeaders().catch((error) => {
+    $("status").textContent = `失敗しました: ${String(error?.message ?? error)}`;
+  });
+});
 
 $("inspect").addEventListener("click", inspect);
 $("options").addEventListener("click", () => chrome.runtime.openOptionsPage());
 restore();
 loadVersions().catch(() => {});
+refreshHeaderButton().catch(() => {});
