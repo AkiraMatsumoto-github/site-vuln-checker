@@ -194,8 +194,8 @@ extension/                     Chrome 拡張（ビルド不要）
   detector.js                  部品とバージョンの推定
   advisor.js                   索引との照合と赤 / 黄 / 灰
   background.js                タブの情報収集 → 判定 → アイコンの色
-  sidepanel.html / .js         結果の表示
-  options.html / .js           索引 URL の設定
+  sidepanel.html / .js         結果の表示（設定画面はありません）
+  config.js                    索引の配信元と鮮度のルール
 src/site_vuln_checker/         索引を作る側（Python 3.14 / uv）
   ingest.py                    NVD → 索引（「X より前」「X 以下」を読み取る）
   enrich.py                    悪用実績（KEV）・悪用確率（EPSS）の付与
@@ -239,11 +239,19 @@ uv run svc-enrich --index out/advisories.json
 > なお NVD は 1 ページを大きくすると 503 を返すため、50 件ずつ取得します（数分かかります）。
 
 
-### 2. 索引を配信する（別のターミナル）
+### 2. 索引を配信する（開発時だけ）
+
+本番（Chrome Web Store で配る版）は **GitHub Releases の索引**を読みます。日次で更新するのは
+`.github/workflows/publish-index.yml` で、手元で配信する必要はありません。
+
+開発中（unpacked）は手元の配信を優先するので、次のコマンドで配信します。
 
 ```powershell
 python -m http.server 8000
 ```
+
+> ストアから入れた拡張は `update_url` を持つため、localhost の候補は使いません
+> （`extension/config.js` の `isDevelopment`）。
 
 ### 3. 拡張を読み込む
 
@@ -253,8 +261,7 @@ python -m http.server 8000
 4. 調べたいサイトを開いてアイコンをクリック → **「このサイトを調べる」**
 
 初回のクリックで、索引の配信元（`http://localhost:8000`）と調べるサイトへの許可を確認されます。
-**許可すれば、URL の入力は一切不要**です。索引の URL を変えたいときだけ、サイドパネルの
-**設定** から指定してください（既定値が入っています）。
+**許可すれば、URL の入力も設定も不要**です。索引は 24 時間たつと「調べる」のタイミングで自動更新されます。
 
 > **閲覧したサイトの URL はどこにも送りません**（通信は索引の取得だけです）。
 
@@ -349,7 +356,8 @@ setx NVD_API_KEY "取得したキー"     # 以後ずっと（新しいターミ
 <details>
 <summary>索引はどのくらいの頻度で更新すればいいですか？</summary>
 
-拡張は 24 時間ごとに自動で取り直します。手動で更新したいときは、設定の「今すぐ更新」を押してください。
+何もしなくて大丈夫です。**「このサイトを調べる」を押したときに、24 時間以上たっていれば自動で取り直します**。
+取りに行けなかった場合は、保存済みの索引で判定を続けます（画面に「索引を更新できませんでした」と出ます）。
 </details>
 
 ## 開発

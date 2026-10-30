@@ -12,9 +12,9 @@
 
 ## 索引（advisories.json）を用意する
 
-拡張は**索引をローカルに持って**照合します。索引の場所は既定値が入っているので、
-**URL を入力する必要はありません**（「このサイトを調べる」の初回クリックで自動的に読み込みます）。
-別の場所から読みたいときだけ、設定画面で指定します。
+拡張は**索引をローカルに持って**照合します。索引の場所は `config.js` に既定値があり、
+**設定画面はありません**。**「このサイトを調べる」を押したときに、索引が無い／24 時間以上たっていれば
+自動で取りに行きます**（初回だけ Chrome がアクセス許可を確認します）。
 
 ```powershell
 cd C:\Users\yahoo\dev\site-vuln-checker
@@ -25,24 +25,17 @@ uv run svc-ingest --source cpe --products php,wordpress,laravel,symfony --merge 
 uv run svc-enrich --index out/advisories.json
 uv run svc-eol --out out/advisories.json
 
-# ローカルで配信する（別のターミナルで）
+# ローカルで配信する（開発中のみ。本番は GitHub Releases を読む）
 python -m http.server 8000
 ```
 
-拡張の既定の読み込み先は次の順です（`config.js`）。
+既定の読み込み先（`config.js`）:
 
-```
-http://localhost:8000/out/advisories.json                                   # ローカル配信
-https://github.com/.../releases/latest/download/advisories.json             # 配布用
-```
+| 環境 | 候補 |
+|---|---|
+| 開発（unpacked） | `http://localhost:8000/out/advisories.json` → `https://github.com/.../releases/latest/download/advisories.json` |
+| 本番（ストア版） | `https://github.com/.../releases/latest/download/advisories.json` のみ |
 
-拡張の**設定**（サイドパネルの「設定」ボタン）で、索引の URL を入れて「保存して読み込む」：
-
-```
-http://localhost:8000/out/advisories.json
-```
-
-> オリジンへのアクセス許可を求められます（`optional_host_permissions`）。
 > 許可しないと索引を取得できません。**閲覧 URL はどこにも送りません**（通信は索引の取得だけ）。
 
 ## 使い方

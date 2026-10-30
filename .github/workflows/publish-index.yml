@@ -1,0 +1,107 @@
+name: Publish index
+
+# 索引（advisories.json）を毎日作り直して GitHub Releases に置く。
+# 拡張は https://github.com/.../releases/latest/download/advisories.json を読む（本番の配信元）。
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 毎日 18:00 UTC（日本時間 03:00）
+    - cron: "0 18 * * *"
+
+permissions:
+  contents: write
+
+env:
+  INDEX_PATH: out/advisories.json
+  TAG: index
+
+jobs:
+  publish:
+    name: build & publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: 前回の索引を取得（差分更新の土台）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release download "$TAG" --pattern advisories.json --dir out --clobber || true
+          fi
+          if [ -f "$INDEX_PATH" ]; then
+            echo "前回の索引: $(python -c "import json;print(len(json.load(open('$INDEX_PATH'))['advisories']))") 件"
+          else
+            echo "前回の索引なし（今回フルで作る）"
+          fi
+
+      - name: 索引を作る（前回があれば直近 14 日だけ足す）
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -f "$INDEX_PATH" ]; then
+            uv run svc-ingest --days 14 --merge --out "$INDEX_PATH"
+          else
+            uv run svc-ingest --out "$INDEX_PATH"
+            uv run svc-ingest --source cpe --products php,wordpress,laravel,symfony,cakephp,django,rails \
+              --merge --out "$INDEX_PATH"
+          fi
+
+      - name: 悪用実績・悪用確率・EOL を足す
+        run: |
+          uv run svc-enrich --index "$INDEX_PATH"
+          uv run svc-eol --out "$INDEX_PATH"
+
+      - name: 検証（空でない・PHP 本体が入っている）
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          import json, pathlib, sys
+          data = json.loads(pathlib.Path("out/advisories.json").read_text(encoding="utf-8"))
+          advisories = data.get("advisories") or []
+          php = [a for a in advisories if a.get("slug") == "php"]
+          lifecycles = data.get("lifecycles") or {}
+          print(f"勧告 {len(advisories)} 件 / PHP {len(php)} 件 / EOL {len(lifecycles.get('products', {}))} 製品")
+          if len(advisories) < 1000:
+              sys.exit("索引が小さすぎます（取り込みに失敗した可能性）")
+          if not php:
+              sys.exit("PHP 本体の勧告がありません（--source cpe が失敗した可能性）")
+          if not lifecycles.get("products"):
+              sys.exit("EOL 情報がありません")
+          PY
+
+      - name: Releases に公開（同じタグに上書き）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --latest \
+              --title "脆弱性索引（自動更新）" \
+              --notes "サイト脆弱性チェッカーが使う索引です。GitHub Actions が毎日更新します。"
+          fi
+          gh release upload "$TAG" "$INDEX_PATH" --clobber
+          gh release edit "$TAG" --latest \
+            --notes "更新: $(date -u '+%Y-%m-%d %H:%M UTC') ／ 勧告 $(du -h "$INDEX_PATH" | cut -f1)"
+
+      - name: 公開後の確認
+        run: |
+          set -euo pipefail
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/advisories.json"
+          code=$(curl -sL -o /dev/null -w '%{http_code}' "$url")
+          echo "$url -> HTTP $code"
+          test "$code" = "200"

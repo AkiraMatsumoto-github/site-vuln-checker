@@ -51,7 +51,7 @@ function renderJudgements(report) {
   if (!judgements.length) {
     const message = report.indexSize
       ? "該当する勧告はありません（検出できた範囲）"
-      : "索引が未設定のため、脆弱性の判定はしていません（設定から索引を読み込んでください）";
+      : "索引を取得できていないため、脆弱性の判定はしていません（「調べる」を押すと自動で取得します）";
     container.append(element("p", "empty", message));
     return;
   }
@@ -126,9 +126,15 @@ function renderReport(report) {
   renderNotes(report);
 
   const levels = report.levels ?? {};
+  // 索引の鮮度も出す（自動更新が止まっていると気づけるように）
+  const generated = report.indexGeneratedAt ? new Date(report.indexGeneratedAt) : null;
+  const staleDays = generated ? Math.floor((Date.now() - generated.getTime()) / 86400000) : null;
   const meta = [
     report.scannedAt ? `判定 ${new Date(report.scannedAt).toLocaleString()}` : null,
-    `索引 ${report.indexSize ?? 0} 件`,
+    generated
+      ? `索引 ${report.indexSize ?? 0} 件（${generated.toLocaleDateString()} 生成）`
+      : `索引 ${report.indexSize ?? 0} 件`,
+    staleDays !== null && staleDays > 14 ? `⚠ 索引が ${staleDays} 日古い` : null,
     levels.red ? `赤 ${levels.red}` : null,
     levels.yellow ? `黄 ${levels.yellow}` : null,
   ].filter(Boolean);
@@ -197,31 +203,30 @@ async function refreshHeaderHint() {
   showRetryLink(Boolean(stored[DECLINED_KEY]?.[info.origin]));
 }
 
-// --- 索引（URL は打たせない）-------------------------------------------------
+// --- 索引（URL は打たせない・古ければ取りに行く）------------------------------
 
 /**
- * 索引が未読込なら、候補 URL を順に試して**自動で**読み込む。
+ * 索引の取得に必要な許可を、**初回だけ**求める。
  *
- * 許可が要るので、ユーザー操作（「このサイトを調べる」）の流れでだけ呼ぶ。
+ * 2 回目以降は許可が残っているので何も聞かない。取得し直すかどうかの判断は
+ * background 側（24 時間ルール）が行う。
  */
-async function ensureIndexLoaded() {
-  const stored = await chrome.storage.local.get(["indexUpdatedAt"]).catch(() => ({}));
-  if (stored.indexUpdatedAt) return true;
+async function ensureIndexPermission() {
+  const stored = await chrome.storage.local
+    .get(["indexUpdatedAt", "indexUrl"])
+    .catch(() => ({}));
 
-  for (const url of INDEX_CANDIDATES) {
+  const candidates = stored.indexUrl ? [stored.indexUrl] : INDEX_CANDIDATES;
+  for (const url of candidates) {
     const pattern = originPattern(url);
-    const granted = await chrome.permissions
-      .contains({ origins: [pattern] })
-      .catch(() => false);
-    const allowed =
-      granted || (await chrome.permissions.request({ origins: [pattern] }).catch(() => false));
-    if (!allowed) continue;
-
-    $("status").textContent = "索引を読み込んでいます…";
-    const result = await chrome.runtime.sendMessage({ type: "loadIndex", url }).catch(() => null);
-    if (result?.count) return true;
+    if (await chrome.permissions.contains({ origins: [pattern] }).catch(() => false)) return true;
+    // 索引をまだ持っていないときだけ聞く（持っているなら今の配信元を使い続ける）
+    if (!stored.indexUpdatedAt) {
+      const granted = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
+      if (granted) return true;
+    }
   }
-  return false;
+  return Boolean(stored.indexUpdatedAt);
 }
 
 async function inspect({ askPermission = false } = {}) {
@@ -230,11 +235,7 @@ async function inspect({ askPermission = false } = {}) {
   $("status").textContent = "調べています…";
   try {
     if (askPermission) {
-      const loaded = await ensureIndexLoaded();
-      if (!loaded) {
-        $("status").textContent =
-          "索引を読み込めませんでした（配信が止まっている可能性があります。詳細は設定を確認してください）";
-      }
+      await ensureIndexPermission();
       await askHeaderPermission();
     }
     const report = await chrome.runtime.sendMessage({ type: "inspect" });
@@ -243,7 +244,10 @@ async function inspect({ askPermission = false } = {}) {
       return;
     }
     renderReport(report);
-    $("status").textContent = "";
+    // 索引を取りに行って失敗したときだけ、その旨を出す（古い索引で判定は続く）
+    const refresh = report.indexRefresh ?? {};
+    $("status").textContent =
+      refresh.error && refresh.usedCached ? "索引を更新できませんでした（前回の索引で判定）" : "";
   } catch (error) {
     $("status").textContent = `失敗しました: ${String(error?.message ?? error)}`;
   } finally {
@@ -256,7 +260,7 @@ async function restore() {
   if (report) renderReport(report);
   const stored = await chrome.storage.local.get(["indexUpdatedAt"]).catch(() => ({}));
   if (!stored.indexUpdatedAt) {
-    $("status").textContent = "初回のチェック時に、弱点の一覧表を自動で読み込みます。";
+    $("status").textContent = "「このサイトを調べる」を押すと、索引を自動で用意します。";
   }
 }
 
@@ -366,7 +370,6 @@ $("grantHeaders").addEventListener("click", () => {
 $("inspect").addEventListener("click", () => {
   inspect({ askPermission: true }).catch(() => {});
 });
-$("options").addEventListener("click", () => chrome.runtime.openOptionsPage());
 restore();
 loadVersions().catch(() => {});
 refreshHeaderHint().catch(() => {});

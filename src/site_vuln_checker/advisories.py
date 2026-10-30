@@ -262,6 +262,8 @@ class AdvisoryIndex:
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {
+            # 索引の形式の版。拡張が将来の変更を見分けられるようにする。
+            "schema": 1,
             "generated_at": self.generated_at,
             "advisories": [a.to_dict() for a in self.advisories],
         }

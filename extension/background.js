@@ -11,7 +11,7 @@
 // 方針（企画書 12.5）: 秘密（API キー）は持たない。通信は索引の取得だけ。
 
 import { AdvisoryIndex, judge, summarizeLevels } from "./advisor.js";
-import { INDEX_CANDIDATES } from "./config.js";
+import { INDEX_CANDIDATES, isIndexStale } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
 import { originPattern } from "./patterns.js";
 
@@ -145,6 +145,7 @@ async function inspectActiveTab() {
   applyVersions(analysis, versions);
   // 入力を反映したあとで「判定できなかったこと」を作り直す（PHP の版が入ったら注意書きを消す）
   analysis.notes = buildNotes(analysis.findings);
+  const indexRefresh = await ensureFreshIndex();
   const index = await loadIndex();
   const judgements = judge(analysis, index);
 
@@ -157,6 +158,7 @@ async function inspectActiveTab() {
     levels: summarizeLevels(judgements),
     indexSize: index ? index.size : 0,
     indexGeneratedAt: index ? index.generatedAt : null,
+    indexRefresh,
     lifecycleSize: index?.lifecycles ? index.lifecycles.size : 0,
     versions,
     scannedAt: new Date().toISOString(),
@@ -233,6 +235,34 @@ function applyVersions(analysis, versions) {
     });
   }
   return analysis;
+}
+
+/**
+ * 索引が必要なら取りに行く（「調べる」のたびに呼ばれる）。
+ *
+ * - 24 時間以内に取れていれば何もしない
+ * - 古い／無い場合は候補から取得し直す
+ * - 取得に失敗しても、保存済みの索引があればそれで判定を続ける
+ */
+async function ensureFreshIndex() {
+  const stored = await chrome.storage.local.get([INDEX_KEY, INDEX_URL_KEY, "indexUpdatedAt"]);
+  const hasCached = Boolean(stored[INDEX_KEY]);
+  if (hasCached && !isIndexStale(stored.indexUpdatedAt)) {
+    return { refreshed: false, usedCached: true };
+  }
+
+  const url = stored[INDEX_URL_KEY] ?? INDEX_CANDIDATES[0];
+  try {
+    const result = await refreshIndex(url);
+    return { refreshed: true, count: result.count, usedCached: false };
+  } catch (error) {
+    // 許可が無い・配信が落ちている等。保存済みがあれば黙ってそれを使う。
+    return {
+      refreshed: false,
+      usedCached: hasCached,
+      error: String(error?.message ?? error),
+    };
+  }
 }
 
 async function loadIndex() {
