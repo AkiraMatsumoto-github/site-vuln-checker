@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>サイト脆弱性チェッカー</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>サイト脆弱性チェッカー</h1>
+      <p id="target" class="target">タブを選んで「このサイトを調べる」を押してください。</p>
+      <div class="actions">
+        <button id="inspect" type="button">このサイトを調べる</button>
+        <button id="options" type="button" class="secondary">設定</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+    </header>
+
+    <main id="result" hidden>
+      <section>
+        <h2>更新すべきもの</h2>
+        <div id="judgements"></div>
+      </section>
+
+      <section>
+        <h2>構成（検出できたもの）</h2>
+        <div id="components"></div>
+      </section>
+
+      <section id="unknownSection" hidden>
+        <h2>判定できなかったこと</h2>
+        <ul id="unknown"></ul>
+      </section>
+
+      <footer>
+        <p>判定は公開情報に基づく<strong>推定</strong>です。安全性を保証するものではありません。</p>
+        <p id="meta" class="meta"></p>
+      </footer>
+    </main>
+
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>
