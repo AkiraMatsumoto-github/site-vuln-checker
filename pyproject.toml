@@ -32,7 +32,7 @@ target-version = "py314"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 # 日本語の文章で使う全角記号を許可する
-allowed-confusables = ["（", "）", "、", "。", "「", "」", "：", "・"]
+allowed-confusables = ["（", "）", "、", "。", "「", "」", "：", "・", "｜"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

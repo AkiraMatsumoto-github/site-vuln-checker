@@ -96,13 +96,13 @@ function parseDate(value) {
 /** EOL 判定の説明文（画面と CLI で同じ言い方にする）。 */
 export function lifecycleNote(status) {
   if (status.state === "eol") {
-    return `${status.eol} にサポート終了（${status.cycle} 系に修正版は提供されません）`;
+    return `${status.eol} にサポート終了（${status.cycle} 系の修正版は出ません）`;
   }
   if (status.state === "eol_soon") {
-    return `${status.eol} にサポート終了予定（まもなく修正版が出なくなります）`;
+    return `${status.eol} にサポート終了予定です`;
   }
   if (status.state === "outdated") {
-    return `同一系統の最新は ${status.latest}（パッチ未適用の可能性）`;
+    return "セキュリティ修正を含むかは分かりません（更新を検討してください）";
   }
   return "";
 }
@@ -114,6 +114,19 @@ function uniqueById(advisories) {
     if (!seen.has(advisory.id)) seen.set(advisory.id, advisory);
   }
   return [...seen.values()];
+}
+
+/** 「どれくらい危ないか」を 1 文で表す（CVE の羅列ではなく理由を伝える）。 */
+function riskReason(affected) {
+  if (affected.some((advisory) => advisory.kev)) return "実際に悪用が確認されています";
+  const maxCvss = Math.max(...affected.map((advisory) => advisory.cvss ?? 0));
+  if (maxCvss >= RED_CVSS) return `深刻度が非常に高い弱点があります（${maxCvss.toFixed(1)}）`;
+  const maxEpss = Math.max(...affected.map((advisory) => advisory.epss ?? 0));
+  if (maxEpss >= RED_EPSS) {
+    return `30 日以内に悪用される確率が高い弱点があります（${Math.round(maxEpss * 100)}%）`;
+  }
+  if (maxCvss) return `弱点の影響を受けます（深刻度 ${maxCvss.toFixed(1)}）`;
+  return "弱点の影響を受けます";
 }
 
 /** 1 コンポーネントを勧告（CVE）と突き合わせる。 */
@@ -128,9 +141,9 @@ function judgeAdvisories(component, index) {
       component: component.name,
       version: null,
       level: LEVEL.GRAY,
-      action: "バージョンを確認する",
+      action: "Version を確認してください",
       advisories: unique,
-      note: `過去に ${unique.length} 件の勧告あり。版が不明なため判定できません`,
+      note: `Version が不明なため判定できません（過去の勧告 ${unique.length} 件）`,
     };
   }
 
@@ -142,9 +155,9 @@ function judgeAdvisories(component, index) {
       component: component.name,
       version: component.version,
       level: LEVEL.NONE,
-      action: "該当なし（この版は修正済み）",
+      action: "この Version は該当しません",
       advisories: unique,
-      note: `過去に ${unique.length} 件の勧告がありますが、すべて修正済みです`,
+      note: `過去の勧告 ${unique.length} 件はすべて修正済みです`,
     };
   }
 
@@ -155,11 +168,13 @@ function judgeAdvisories(component, index) {
     component: component.name,
     version: component.version,
     level: levelFor(affected),
-    action: fixed.length ? `→ ${fixed[fixed.length - 1]} へ更新` : "修正版不明（ベンダに確認）",
+    action: fixed.length
+      ? `修正版 ${fixed[fixed.length - 1]} に更新してください`
+      : "修正版は公開されていません（ベンダに確認してください）",
     advisories: uniqueById(
       [...affected].sort((a, b) => Number(!a.kev) - Number(!b.kev) || (b.cvss ?? 0) - (a.cvss ?? 0)),
     ),
-    note: "",
+    note: riskReason(affected),
   };
 }
 
@@ -174,13 +189,17 @@ function judgeLifecycle(component, lifecycles, today) {
   let level = LEVEL.NONE;
   let action;
   if (status.state === "eol") {
-    action = status.moveTo ? `→ ${status.moveTo} 以降へ移行` : "→ サポート中の系統へ移行";
+    action = status.moveTo
+      ? `サポートが終了しています。${status.moveTo} 以降に移行してください`
+      : "サポートが終了しています。サポート中の系統へ移行してください";
     level = LEVEL.YELLOW;
   } else if (status.state === "eol_soon") {
-    action = status.moveTo ? `→ ${status.moveTo} 以降へ更新` : "→ サポート中の系統へ更新";
+    action = status.moveTo
+      ? `サポート終了が近づいています。${status.moveTo} 以降に更新してください`
+      : "サポート終了が近づいています。サポート中の系統へ更新してください";
     level = LEVEL.YELLOW;
   } else {
-    action = `→ ${status.latest} へ更新（同一系統）`;
+    action = `同じ ${status.cycle} 系の最新は ${status.latest} です`;
   }
 
   return {

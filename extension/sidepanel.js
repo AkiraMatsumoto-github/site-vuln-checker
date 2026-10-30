@@ -25,14 +25,16 @@ function element(tag, className, text) {
 }
 
 function advisoryLine(advisory) {
-  const parts = [`CVSS ${advisory.cvss ?? "—"}`];
-  if (advisory.kev) parts.push("KEV");
+  // CVSS / EPSS という略語だけだと意味が伝わらないので、言葉で書く
+  const parts = [];
+  if (advisory.cvss !== null && advisory.cvss !== undefined) parts.push(`深刻度 ${advisory.cvss}`);
+  if (advisory.kev) parts.push("実際に悪用あり");
   if (advisory.epss !== null && advisory.epss !== undefined) {
-    parts.push(`EPSS ${Math.round(advisory.epss * 100)}%`);
+    parts.push(`悪用の可能性 ${Math.round(advisory.epss * 100)}%`);
   }
   const item = element("li");
   item.append(element("code", "", advisory.id));
-  item.append(document.createTextNode(` ・ ${parts.join(" ・ ")}`));
+  if (parts.length) item.append(document.createTextNode(` ｜ ${parts.join(" ｜ ")}`));
   return item;
 }
 
@@ -43,7 +45,7 @@ function judgementItem(judgement, level) {
   const head = element("div", "item-head");
   head.append(
     element("span", "name", judgement.component),
-    element("span", "version", judgement.version ? `v${judgement.version}` : "版不明"),
+    element("span", "version", judgement.version ? `Version ${judgement.version}` : "Version 不明"),
   );
   item.append(head);
   item.append(element("p", "action", judgement.action));
@@ -57,7 +59,7 @@ function judgementItem(judgement, level) {
     if (level === "none") {
       // 該当なしのときは、過去の勧告を**畳んで**出す（同じ CVE の山で誤解させない）
       const details = document.createElement("details");
-      const summary = element("summary", "", `過去の勧告 ${advisories.length} 件を見る`);
+      const summary = element("summary", "", `根拠（CVE ${advisories.length} 件）を見る`);
       details.append(summary, list);
       item.append(details);
     } else {

@@ -63,7 +63,7 @@ def test_red_when_kev() -> None:
     cf7 = judgements["contact-form-7"]
     assert cf7.level == LEVEL_RED, "KEV に載っている勧告があるので赤"
     assert cf7.version == "5.9.8"
-    assert cf7.action == "→ 5.9.9 へ更新"
+    assert cf7.action == "修正版 5.9.9 に更新してください"
     assert cf7.is_issue is True
     assert cf7.advisories[0].kev is True
     assert cf7.advisories[0].id == "CVE-2025-90001"
@@ -82,7 +82,7 @@ def test_yellow_when_cvss_is_below_red() -> None:
     judgements = judge(analysis, _index())
     assert len(judgements) == 1
     assert judgements[0].level == LEVEL_YELLOW
-    assert judgements[0].action == "→ 3.20.0 へ更新"
+    assert judgements[0].action == "修正版 3.20.0 に更新してください"
 
 
 def test_unknown_version_is_gray_not_green() -> None:
@@ -92,7 +92,7 @@ def test_unknown_version_is_gray_not_green() -> None:
     assert len(judgements) == 1
     assert judgements[0].level == LEVEL_GRAY
     assert judgements[0].version is None
-    assert "1 件の勧告" in judgements[0].note
+    assert "過去の勧告 1 件" in judgements[0].note
     assert judgements[0].is_issue is False, "灰は「更新すべきもの」とは別枠"
 
 
@@ -137,7 +137,9 @@ def test_affected_upto_is_red_and_reports_unknown_fix() -> None:
     judgement = judgements[0]
     assert judgement.level == LEVEL_RED, "CVSS 9.8 なので赤"
     assert judgement.component == "wplp-cookie-consent"
-    assert judgement.action == "修正版不明（ベンダに確認）", "「X 以下」だけでは修正版が分からない"
+    assert judgement.action == "修正版は公開されていません（ベンダに確認してください）", (
+        "「X 以下」だけでは修正版が分からない"
+    )
 
 
 def test_affected_upto_excludes_later_version() -> None:
@@ -293,7 +295,7 @@ def test_same_cve_across_branches_is_shown_once() -> None:
     judgements = judge(analysis, index)
     assert len(judgements) == 1
     assert judgements[0].level == LEVEL_NONE
-    assert "該当なし" in judgements[0].action
+    assert "該当しません" in judgements[0].action
     assert "すべて修正済み" in judgements[0].note
     assert len(judgements[0].advisories) == 1, "同じ CVE は 1 行にまとめる"
 

@@ -124,14 +124,17 @@ _LEVEL_LABELS = {
 
 
 def _advisory_line(advisory: dict) -> str:
-    """`CVE-xxxx ・ CVSS 9.8 ・ KEV ・ EPSS 42%` のような 1 行。"""
+    """`CVE-xxxx ｜ 深刻度 9.8 ｜ 実際に悪用あり ｜ 悪用の可能性 42%` のような 1 行。"""
     cvss = advisory.get("cvss")
-    parts = [f"CVSS {_esc(cvss if cvss is not None else '—')}"]
+    parts = []
+    if cvss is not None:
+        parts.append(f"深刻度 {_esc(cvss)}")
     if advisory.get("kev"):
-        parts.append("<b>KEV</b>")
+        parts.append("<b>実際に悪用あり</b>")
     if advisory.get("epss") is not None:
-        parts.append(f"EPSS {float(advisory['epss']) * 100:.0f}%")
-    return f"<code>{_esc(advisory.get('id'))}</code> " + " ・ ".join(parts)
+        parts.append(f"悪用の可能性 {float(advisory['epss']) * 100:.0f}%")
+    detail = " ｜ " + " ｜ ".join(parts) if parts else ""
+    return f"<code>{_esc(advisory.get('id'))}</code>{detail}"
 
 
 def _judgement_rows(judgements: list[dict]) -> str:

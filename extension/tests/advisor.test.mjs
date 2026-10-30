@@ -88,14 +88,14 @@ test("KEV 該当は赤で、更新先を出す", () => {
   const judgements = judge(analysis([plugin("contact-form-7", "5.9.8")]), AdvisoryIndex.fromJSON(INDEX));
   assert.equal(judgements.length, 1);
   assert.equal(judgements[0].level, LEVEL.RED);
-  assert.equal(judgements[0].action, "→ 5.9.9 へ更新");
+  assert.equal(judgements[0].action, "修正版 5.9.9 に更新してください");
   assert.equal(judgements[0].advisories[0].id, "CVE-2025-90001");
 });
 
 test("CVSS が低ければ黄", () => {
   const judgements = judge(analysis([plugin("elementor", "3.19.0")]), AdvisoryIndex.fromJSON(INDEX));
   assert.equal(judgements[0].level, LEVEL.YELLOW);
-  assert.equal(judgements[0].action, "→ 3.20.0 へ更新");
+  assert.equal(judgements[0].action, "修正版 3.20.0 に更新してください");
 });
 
 test("修正版以降なら該当なし（重複 CVE は 1 件にまとめる）", () => {
@@ -117,7 +117,7 @@ test("修正版以降なら該当なし（重複 CVE は 1 件にまとめる）
   const judgements = judge(analysis([component]), index);
   assert.equal(judgements.length, 1);
   assert.equal(judgements[0].level, LEVEL.NONE);
-  assert.match(judgements[0].action, /該当なし/);
+  assert.match(judgements[0].action, /該当しません/);
   assert.match(judgements[0].note, /すべて修正済み/);
   assert.equal(judgements[0].advisories.length, 1, "同じ CVE を 1 行にまとめる");
 });
@@ -142,7 +142,7 @@ test("該当する勧告も CVE 単位で 1 行（系統が複数当たっても
 test("版が不明なら灰（緑にしない）", () => {
   const judgements = judge(analysis([plugin("elementor", null)]), AdvisoryIndex.fromJSON(INDEX));
   assert.equal(judgements[0].level, LEVEL.GRAY);
-  assert.match(judgements[0].note, /1 件の勧告/);
+  assert.match(judgements[0].note, /過去の勧告 1 件/);
 });
 
 test("勧告が無いプラグインは判定を出さない", () => {
@@ -273,7 +273,7 @@ test("EOL だけなら黄、同一系統のパッチ遅れは「—」", () => {
     eol.map((item) => item.level),
     [LEVEL.YELLOW],
   );
-  assert.match(eol[0].action, /8\.5\.12 以降へ移行/);
+  assert.match(eol[0].action, /8\.5\.12 以降に移行/);
 
   const outdated = judge(analysis([language("php", "8.4.20")]), index, TODAY);
   assert.deepEqual(

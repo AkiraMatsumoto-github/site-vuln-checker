@@ -325,6 +325,21 @@ def _unique_by_id(advisories: list[Advisory]) -> tuple[Advisory, ...]:
     return tuple(seen.values())
 
 
+def _risk_reason(affected: list[Advisory]) -> str:
+    """「どれくらい危ないか」を 1 文で表す（CVE の羅列ではなく理由を伝える）。"""
+    if any(a.kev for a in affected):
+        return "実際に悪用が確認されています"
+    max_cvss = max((a.cvss or 0.0) for a in affected)
+    if max_cvss >= RED_CVSS:
+        return f"深刻度が非常に高い弱点があります（{max_cvss:.1f}）"
+    max_epss = max((a.epss or 0.0) for a in affected)
+    if max_epss >= RED_EPSS:
+        return f"30 日以内に悪用される確率が高い弱点があります（{max_epss * 100:.0f}%）"
+    if max_cvss:
+        return f"弱点の影響を受けます（深刻度 {max_cvss:.1f}）"
+    return "弱点の影響を受けます"
+
+
 def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | None:
     """1 コンポーネントを勧告（CVE）と突き合わせる。"""
     advisories = index.advisories_for(finding)
@@ -338,9 +353,9 @@ def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | Non
             component=finding.name,
             version=None,
             level=LEVEL_GRAY,
-            action="バージョンを確認する",
+            action="Version を確認してください",
             advisories=unique,
-            note=f"過去に {len(unique)} 件の勧告あり。版が不明なため判定できません",
+            note=f"Version が不明なため判定できません（過去の勧告 {len(unique)} 件）",
         )
 
     affected = [advisory for advisory in advisories if is_affected(finding.version, advisory)]
@@ -352,19 +367,24 @@ def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | Non
             component=finding.name,
             version=finding.version,
             level=LEVEL_NONE,
-            action="該当なし（この版は修正済み）",
+            action="この Version は該当しません",
             advisories=unique,
-            note=f"過去に {len(unique)} 件の勧告がありますが、すべて修正済みです",
+            note=f"過去の勧告 {len(unique)} 件はすべて修正済みです",
         )
 
     fixed_versions = sorted({a.fixed for a in affected if a.fixed}, key=version_key)
-    action = f"→ {fixed_versions[-1]} へ更新" if fixed_versions else "修正版不明（ベンダに確認）"
+    action = (
+        f"修正版 {fixed_versions[-1]} に更新してください"
+        if fixed_versions
+        else "修正版は公開されていません（ベンダに確認してください）"
+    )
     return Judgement(
         component=finding.name,
         version=finding.version,
         level=_level_for(affected),
         action=action,
         advisories=_unique_by_id(sorted(affected, key=lambda a: (not a.kev, -(a.cvss or 0.0)))),
+        note=_risk_reason(affected),
     )
 
 
@@ -375,11 +395,11 @@ LIFECYCLE_KINDS = ("core", "language", "framework", "library")
 def lifecycle_note(status: LifecycleStatus) -> str:
     """EOL 判定の説明文（画面と CLI で同じ言い方にする）。"""
     if status.state == "eol":
-        return f"{status.eol} にサポート終了（{status.cycle} 系に修正版は提供されません）"
+        return f"{status.eol} にサポート終了（{status.cycle} 系の修正版は出ません）"
     if status.state == "eol_soon":
-        return f"{status.eol} にサポート終了予定（まもなく修正版が出なくなります）"
+        return f"{status.eol} にサポート終了予定です"
     if status.state == "outdated":
-        return f"同一系統の最新は {status.latest}（パッチ未適用の可能性）"
+        return "セキュリティ修正を含むかは分かりません（更新を検討してください）"
     return ""
 
 
@@ -398,16 +418,20 @@ def _judge_lifecycle(
 
     if status.state == "eol":
         action = (
-            f"→ {status.move_to} 以降へ移行" if status.move_to else "→ サポート中の系統へ移行"
+            f"サポートが終了しています。{status.move_to} 以降に移行してください"
+            if status.move_to
+            else "サポートが終了しています。サポート中の系統へ移行してください"
         )
         level = LEVEL_YELLOW
     elif status.state == "eol_soon":
         action = (
-            f"→ {status.move_to} 以降へ更新" if status.move_to else "→ サポート中の系統へ更新"
+            f"サポート終了が近づいています。{status.move_to} 以降に更新してください"
+            if status.move_to
+            else "サポート終了が近づいています。サポート中の系統へ更新してください"
         )
         level = LEVEL_YELLOW
     else:  # outdated
-        action = f"→ {status.latest} へ更新（同一系統）"
+        action = f"同じ {status.cycle} 系の最新は {status.latest} です"
         level = LEVEL_NONE
 
     return Judgement(
