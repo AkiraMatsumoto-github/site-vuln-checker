@@ -302,6 +302,8 @@ def save(index: AdvisoryIndex, path: Path) -> None:
 #: NVD は pubStartDate / pubEndDate の範囲を 120 日までに制限している。
 #: 長い期間を取るときは 120 日ずつに分けて取得し、索引に積み上げる。
 MAX_WINDOW_DAYS = 120
+#: 既定の取得期間（約 1 年）。数十年分を毎回取り直すのは現実的でないため。
+DEFAULT_DAYS = 365
 #: 全期間を取るときの開始点（WordPress のプラグインが CVE を取り始めた頃より前）。
 FULL_START = datetime(2005, 1, 1, tzinfo=UTC)
 
@@ -338,22 +340,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--days",
         type=int,
-        default=None,
-        help="公開日が何日前までか。省略すると全期間（NVD は深いページングが遅いので、"
-        "大きな索引は --merge で期間を分けて積み上げる）",
+        default=DEFAULT_DAYS,
+        help=f"公開日が何日前までか（既定 {DEFAULT_DAYS} 日 = 約 1 年）",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="全期間（2005 年以降）を取得する。120 日ずつ分割するので数分かかる",
     )
     parser.add_argument(
         "--merge", action="store_true", help="既存の索引に足し込む（重複は CVE と名前で除く）"
     )
-    parser.add_argument("--limit", type=int, default=400, help="取得する CVE の上限（0=無制限）")
+    parser.add_argument("--limit", type=int, default=0, help="取得する CVE の上限（0=無制限）")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
 
     end = datetime.now(UTC)
-    windows = _windows(args.days, end)
+    days = None if args.all else args.days
+    windows = _windows(days, end)
 
     client = NvdClient()
-    label = "全期間" if args.days is None else f"直近 {args.days} 日"
+    label = "全期間" if days is None else f"直近 {days} 日"
     print(
         f"NVD から取得: keyword={args.keyword!r} / {label}（{len(windows)} 分割） / "
         f"キー={'あり' if client.authenticated else 'なし'}（間隔 {client.interval} 秒）"
