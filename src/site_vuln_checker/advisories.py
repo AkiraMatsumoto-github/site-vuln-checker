@@ -370,7 +370,7 @@ def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | Non
             component=finding.name,
             version=finding.version,
             level=LEVEL_NONE,
-            action="この Version には脆弱性は報告されていません",
+            action="この Version に脆弱性の勧告はありません",
             advisories=unique,
             note=f"過去の勧告 {len(unique)} 件は、すべて修正済みです",
         )

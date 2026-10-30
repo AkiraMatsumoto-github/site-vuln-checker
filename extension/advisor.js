@@ -153,7 +153,7 @@ function judgeAdvisories(component, index) {
       component: component.name,
       version: component.version,
       level: LEVEL.NONE,
-      action: "この Version には脆弱性は報告されていません",
+      action: "この Version に脆弱性の勧告はありません",
       advisories: unique,
       note: `過去の勧告 ${unique.length} 件は、すべて修正済みです`,
     };
