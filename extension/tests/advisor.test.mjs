@@ -75,7 +75,7 @@ test("affected_upto は境界を含む", () => {
 
 test("前方一致でマーケティング名を拾う", () => {
   const index = AdvisoryIndex.fromJSON(INDEX);
-  const found = index.advisoriesFor({ name: "wplp-cookie-consent" });
+  const found = index.advisoriesFor({ kind: "plugin", name: "wplp-cookie-consent" });
   assert.deepEqual(
     found.map((item) => item.id),
     ["CVE-2026-90004"],
@@ -136,15 +136,121 @@ test("EPSS 0.5 以上は赤", () => {
   assert.equal(judgements[0].level, LEVEL.RED);
 });
 
+test("同じコンポーネントが 2 回出ても 1 行にまとめる", () => {
+  const index = AdvisoryIndex.fromJSON(INDEX);
+  const judgements = judge(
+    analysis([plugin("elementor", "3.19.0"), plugin("elementor", null)]),
+    index,
+  );
+  assert.equal(judgements.length, 1);
+  assert.equal(judgements[0].level, LEVEL.YELLOW);
+});
+
 test("内訳の集計", () => {
   const index = AdvisoryIndex.fromJSON(INDEX);
   const judgements = judge(
     analysis([
       plugin("contact-form-7", "5.9.8"),
       plugin("elementor", "3.19.0"),
-      plugin("elementor", null),
+      plugin("wplp-cookie-consent", null),
     ]),
     index,
   );
   assert.deepEqual(summarizeLevels(judgements), { red: 1, yellow: 1, gray: 1, none: 0 });
 });
+
+// --- CPE の下限つき範囲とライフサイクル（EOL）---------------------------------
+
+test("CPE の下限より下は影響なし", () => {
+  const advisory = {
+    id: "CVE-2026-109618",
+    name: "PHP",
+    slug: "php",
+    affected_at_or_above: "7.3.0",
+    affected_below: "8.2.35",
+  };
+  assert.equal(isAffected("8.1.27", advisory), true);
+  assert.equal(isAffected("8.2.35", advisory), false);
+  assert.equal(isAffected("7.2.34", advisory), false);
+});
+
+const TODAY = new Date(Date.UTC(2026, 9, 29));
+
+const LIFECYCLE_INDEX = {
+  generated_at: "2026-10-29T00:00:00Z",
+  advisories: [
+    {
+      id: "CVE-2026-109618",
+      name: "PHP",
+      slug: "php",
+      affected_at_or_above: "7.3.0",
+      affected_below: "8.2.35",
+      fixed: "8.2.35",
+      cvss: 9.8,
+    },
+  ],
+  lifecycles: {
+    products: {
+      php: {
+        name: "PHP",
+        cycles: [
+          { cycle: "8.5", eol: "2029-12-31", latest: "8.5.12" },
+          { cycle: "8.4", eol: "2028-12-31", latest: "8.4.27" },
+          { cycle: "8.3", eol: "2027-12-31", latest: "8.3.36" },
+          { cycle: "8.2", eol: "2026-12-31", latest: "8.2.35" },
+          { cycle: "8.1", eol: "2025-12-31", latest: "8.1.34" },
+        ],
+      },
+    },
+  },
+};
+
+function language(name, version) {
+  return { kind: "language", name, version, confidence: 1, evidence: [`input:${name}`], active: null };
+}
+
+test("ライフサイクルを索引から読む（製品名でも引ける）", () => {
+  const index = AdvisoryIndex.fromJSON(LIFECYCLE_INDEX);
+  assert.equal(index.lifecycles.size, 1);
+  assert.equal(index.lifecycles.check("PHP", "8.1.27", TODAY).state, "eol");
+  assert.equal(index.lifecycles.check("php", "8.5.12", TODAY).state, "supported");
+});
+
+test("PHP 8.1 は EOL で黄（PHP2Shell の CVE と合わさって赤）", () => {
+  const index = AdvisoryIndex.fromJSON(LIFECYCLE_INDEX);
+
+  // 脆弱性だけを見れば赤、EOL だけを見れば黄。合わさったら赤で 1 行。
+  const judgements = judge(analysis([language("php", "8.1.27")]), index, TODAY);
+  assert.equal(judgements.length, 1);
+  const only = judgements[0];
+  assert.equal(only.level, LEVEL.RED);
+  assert.match(only.action, /8\.2\.35/); // 修正版（脆弱性）
+  assert.match(only.action, /8\.5\.12/); // 移行先（EOL）
+  assert.match(only.note, /2025-12-31 にサポート終了/);
+});
+
+test("EOL だけなら黄、同一系統のパッチ遅れは「—」", () => {
+  const index = AdvisoryIndex.fromJSON({ lifecycles: LIFECYCLE_INDEX.lifecycles });
+
+  const eol = judge(analysis([language("php", "8.1.27")]), index, TODAY);
+  assert.deepEqual(
+    eol.map((item) => item.level),
+    [LEVEL.YELLOW],
+  );
+  assert.match(eol[0].action, /8\.5\.12 以降へ移行/);
+
+  const outdated = judge(analysis([language("php", "8.4.20")]), index, TODAY);
+  assert.deepEqual(
+    outdated.map((item) => item.level),
+    [LEVEL.NONE],
+  );
+  assert.match(outdated[0].action, /8\.4\.27/);
+
+  assert.deepEqual(judge(analysis([language("php", "8.5.12")]), index, TODAY), []);
+});
+
+test("プラグインは EOL 判定の対象外", () => {
+  const index = AdvisoryIndex.fromJSON({ lifecycles: LIFECYCLE_INDEX.lifecycles });
+  assert.deepEqual(judge(analysis([plugin("php", "8.1.27")]), index, TODAY), []);
+});
+

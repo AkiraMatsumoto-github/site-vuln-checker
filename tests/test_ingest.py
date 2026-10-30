@@ -12,14 +12,18 @@ from site_vuln_checker.ingest import (
     _params,
     _windows,
     build_index,
+    cpe_product,
+    cpe_version,
     extract_cvss,
     extract_name,
     extract_names,
     extract_range,
     is_plausible_name,
     merge_index,
+    parse_cpe_cve,
     parse_cve,
     parse_cves,
+    published_at,
     summarize,
 )
 
@@ -253,3 +257,103 @@ def test_build_index_dedupes() -> None:
     assert stats["advisories"] == 2
     assert stats["重複"] == 1
     assert stats["影響バージョンを特定できない"] == 1
+
+
+# --- CPE（PHP 本体・フレームワーク）-------------------------------------------------
+
+
+def test_cpe_product_and_version() -> None:
+    assert cpe_product("cpe:2.3:a:php:php:*:*:*:*:*:*:*:*") == "php"
+    assert cpe_product("cpe:2.3:a:wordpress:wordpress:*:*:*:*:*:*:*:*") == "wordpress"
+    assert cpe_product("cpe:2.3:a:sensiolabs:symfony:*:*:*:*:*:*:*:*") == "symfony"
+    assert cpe_product("cpe:2.3:a:somevendor:other:*:*:*:*:*:*:*:*") is None
+    # 版が固定されていない CPE は None
+    assert cpe_version("cpe:2.3:a:php:php:*:*:*:*:*:*:*:*") is None
+    assert cpe_version("cpe:2.3:a:php:php:8.1.27:*:*:*:*:*:*:*") == "8.1.27"
+
+
+def php_cve_item() -> dict:
+    """実際の NVD（CVE-2026-109618）の構造を縮めたもの。系統ごとに範囲が 4 つある。"""
+    ranges = [
+        ("7.3.0", "8.2.35"),
+        ("8.3.0", "8.3.36"),
+        ("8.4.0", "8.4.27"),
+        ("8.5.0", "8.5.12"),
+    ]
+    return {
+        "cve": {
+            "id": "CVE-2026-109618",
+            "published": "2026-10-21T14:17:09.000",
+            "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 9.8}}]},
+            "configurations": [
+                {
+                    "nodes": [
+                        {
+                            "cpeMatch": [
+                                {
+                                    "vulnerable": True,
+                                    "criteria": "cpe:2.3:a:php:php:*:*:*:*:*:*:*:*",
+                                    "versionStartIncluding": start,
+                                    "versionEndExcluding": end,
+                                }
+                                for start, end in ranges
+                            ]
+                        }
+                    ]
+                }
+            ],
+        }
+    }
+
+
+def test_parse_cpe_cve_keeps_each_branch() -> None:
+    """同じ CVE でも系統ごとに修正版が違うので、4 件すべて残す。"""
+    advisories, reason = parse_cpe_cve(php_cve_item())
+    assert reason == "ok"
+    assert len(advisories) == 4
+    assert {a.slug for a in advisories} == {"php"}
+    assert {a.name for a in advisories} == {"PHP"}
+    assert {a.fixed for a in advisories} == {"8.2.35", "8.3.36", "8.4.27", "8.5.12"}
+    assert all(a.affected_at_or_above for a in advisories)
+    assert all(a.cvss == 9.8 for a in advisories)
+    assert all(a.source == "nvd-cpe" for a in advisories)
+
+
+def test_build_index_does_not_collapse_branches() -> None:
+    index = build_index([php_cve_item()], parser=parse_cpe_cve)
+    assert len(index.advisories) == 4
+
+
+def test_parse_cpe_cve_ignores_other_products() -> None:
+    item = {
+        "cve": {
+            "id": "CVE-2026-99999",
+            "configurations": [
+                {
+                    "nodes": [
+                        {
+                            "cpeMatch": [
+                                {
+                                    "vulnerable": True,
+                                    "criteria": "cpe:2.3:a:other:thing:*:*:*:*:*:*:*:*",
+                                    "versionEndExcluding": "1.2.3",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+        }
+    }
+    advisories, reason = parse_cpe_cve(item)
+    assert advisories == []
+    assert reason == "CPE に影響範囲が無い"
+
+
+def test_published_at_is_timezone_aware() -> None:
+    """NVD の published はタイムゾーン無しなので UTC を補う（比較で落ちないように）。"""
+    value = published_at({"cve": {"published": "2026-10-21T14:17:09.000"}})
+    assert value is not None
+    assert value.tzinfo is not None
+    assert value > datetime(2026, 10, 1, tzinfo=UTC)
+

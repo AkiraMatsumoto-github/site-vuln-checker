@@ -13,6 +13,7 @@ NVD の本文には**修正版の書き方が 3 通り**あるので、それぞ
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import sys
@@ -23,10 +24,36 @@ from typing import Any
 import httpx
 
 from .advisories import Advisory, AdvisoryIndex
+from .eol import PRODUCTS as EOL_PRODUCTS
 from .nvd import NvdClient
 
 DEFAULT_OUT = Path("out") / "advisories.json"
 DEFAULT_KEYWORD = "WordPress plugin"
+
+#: CPE（構造化データ）から取り込む製品。キーは検出・入力・ライフサイクルと揃える。
+#: NVD の CPE は範囲（``7.3.0 以上 8.2.35 未満``）を持つので、本文の言い回しに
+#: 依存せずに影響範囲を取れる。PHP 本体やフレームワークはこちらで取り込む。
+CPE_PRODUCTS: dict[str, tuple[str, ...]] = {
+    "php": ("cpe:2.3:a:php:php",),
+    "wordpress": ("cpe:2.3:a:wordpress:wordpress",),
+    "laravel": ("cpe:2.3:a:laravel:laravel",),
+    "symfony": ("cpe:2.3:a:symfony:symfony", "cpe:2.3:a:sensiolabs:symfony"),
+    "codeigniter": ("cpe:2.3:a:codeigniter:codeigniter",),
+    "cakephp": ("cpe:2.3:a:cakephp:cakephp",),
+    "django": ("cpe:2.3:a:djangoproject:django",),
+    "rails": ("cpe:2.3:a:rubyonrails:rails",),
+}
+
+#: ``(vendor, product)`` → 製品キー（CPE の照合用）
+_CPE_KEYS: dict[tuple[str, str], str] = {
+    (cpe.split(":")[3], cpe.split(":")[4]): product
+    for product, cpes in CPE_PRODUCTS.items()
+    for cpe in cpes
+}
+
+#: CPE 検索の 1 ページあたりの件数。大きくすると NVD が 503 を返すため小さめにする。
+CPE_PAGE_SIZE = 50
+
 
 _VERSION = r"\d+(?:\.\d+)+"
 
@@ -231,16 +258,102 @@ def parse_cve(item: dict[str, Any]) -> tuple[Advisory | None, str]:
     return (advisories[0] if advisories else None), reason
 
 
+def cpe_product(criteria: str) -> str | None:
+    """``cpe:2.3:a:php:php:*:...`` から製品キーを返す（対象外なら ``None``）。"""
+    parts = str(criteria).split(":")
+    if len(parts) < 6 or parts[0] != "cpe":
+        return None
+    return _CPE_KEYS.get((parts[3], parts[4]))
+
+
+def cpe_version(criteria: str) -> str | None:
+    """CPE に固定のバージョンが入っている場合だけ返す（``*`` / ``-`` は無し）。"""
+    parts = str(criteria).split(":")
+    if len(parts) < 6:
+        return None
+    value = parts[5]
+    return None if value in ("*", "-", "") else value
+
+
+def parse_cpe_cve(item: dict[str, Any]) -> tuple[list[Advisory], str]:
+    """CPE で範囲が分かる CVE を勧告に変換する（PHP 本体・フレームワーク用）。
+
+    本文の言い回しに依存しないため、``before`` 等の表現が無くても取り込める。
+    範囲がまったく無い CVE（CPE が ``*`` だけ）は取り込まない。
+    """
+    cve = item.get("cve") or {}
+    cve_id = str(cve.get("id") or "")
+    if not cve_id:
+        return [], "ID が無い"
+
+    cvss = extract_cvss(cve)
+    url = nvd_url(cve_id, cve.get("references") or [])
+    found: list[Advisory] = []
+    seen: set[tuple[str, str, str, str]] = set()
+
+    for config in cve.get("configurations") or []:
+        for node in config.get("nodes") or []:
+            for match in node.get("cpeMatch") or []:
+                if match.get("vulnerable") is False:
+                    continue
+                criteria = str(match.get("criteria") or "")
+                product = cpe_product(criteria)
+                if not product:
+                    continue
+
+                start = match.get("versionStartIncluding")
+                end_excluding = match.get("versionEndExcluding")
+                end_including = match.get("versionEndIncluding")
+                exact = cpe_version(criteria)
+                if not (start or end_excluding or end_including or exact):
+                    continue
+
+                key = (
+                    product,
+                    str(start or exact or ""),
+                    str(end_excluding or ""),
+                    str(end_including or exact or ""),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                found.append(
+                    Advisory(
+                        id=cve_id,
+                        name=EOL_PRODUCTS.get(product, product),
+                        slug=product,
+                        affected_below=end_excluding,
+                        affected_upto=end_including or (exact if not end_excluding else None),
+                        affected_at_or_above=start or exact,
+                        fixed=end_excluding,
+                        cvss=cvss,
+                        source="nvd-cpe",
+                        url=url,
+                    )
+                )
+
+    if not found:
+        return [], "CPE に影響範囲が無い"
+    return found, "ok"
+
+
 def build_index(
-    items: list[dict[str, Any]], *, generated_at: str | None = None
+    items: list[dict[str, Any]],
+    *,
+    generated_at: str | None = None,
+    parser: Any = parse_cves,
 ) -> AdvisoryIndex:
-    """CVE のリストから索引を作る（同じ CVE・同じ名前の重複を除く）。"""
+    """CVE のリストから索引を作る（同じ CVE・同じ名前の重複を除く）。
+
+    ``parser`` を差し替えると CPE 由来の取り込みにも使える。
+    """
     advisories: list[Advisory] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for item in items:
-        parsed, _reason = parse_cves(item)
+        parsed, _reason = parser(item)
         for advisory in parsed:
-            key = (advisory.id, advisory.key)
+            key = (advisory.id, advisory.key, advisory.range_key)
             if key in seen:
                 continue
             seen.add(key)
@@ -255,19 +368,24 @@ def merge_index(base: AdvisoryIndex, extra: AdvisoryIndex) -> AdvisoryIndex:
     """既存の索引に新しい索引を足す（CVE・名前の単位で重複を除く）。
 
     NVD の全期間を一度に取るのは API 側が遅いため、**期間を分けて取得して積み上げる**。
+    ライフサイクル（EOL）は取り込みでは変わらないので、既存のものを引き継ぐ。
     """
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     merged: list[Advisory] = []
     for advisory in [*base.advisories, *extra.advisories]:
-        key = (advisory.id, advisory.key)
+        key = (advisory.id, advisory.key, advisory.range_key)
         if key in seen:
             continue
         seen.add(key)
         merged.append(advisory)
-    return AdvisoryIndex(advisories=merged, generated_at=extra.generated_at or base.generated_at)
+    return AdvisoryIndex(
+        advisories=merged,
+        generated_at=extra.generated_at or base.generated_at,
+        lifecycles=extra.lifecycles or base.lifecycles,
+    )
 
 
-def summarize(items: list[dict[str, Any]]) -> dict[str, int]:
+def summarize(items: list[dict[str, Any]], parser: Any = parse_cves) -> dict[str, int]:
     """取り込みの内訳。
 
     - ``kept``: 索引に寄与した CVE の数
@@ -275,20 +393,20 @@ def summarize(items: list[dict[str, Any]]) -> dict[str, int]:
     - ``skipped``: 除外した CVE の数（理由別にも数える）
     """
     stats = {"total": len(items), "kept": 0, "skipped": 0, "advisories": 0}
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     for item in items:
-        parsed, reason = parse_cves(item)
+        parsed, reason = parser(item)
         if not parsed:
             stats["skipped"] += 1
             stats[reason] = stats.get(reason, 0) + 1
             continue
-        fresh = [a for a in parsed if (a.id, a.key) not in seen]
+        fresh = [a for a in parsed if (a.id, a.key, a.range_key) not in seen]
         if not fresh:
             stats["skipped"] += 1
             stats["重複"] = stats.get("重複", 0) + 1
             continue
         for advisory in fresh:
-            seen.add((advisory.id, advisory.key))
+            seen.add((advisory.id, advisory.key, advisory.range_key))
         stats["kept"] += 1
         stats["advisories"] += len(fresh)
     return stats
@@ -331,60 +449,119 @@ def _windows(days: int | None, end: datetime) -> list[tuple[datetime, datetime]]
     return windows
 
 
+def published_at(item: dict[str, Any]) -> datetime | None:
+    """CVE の公開日時（``2026-10-21T14:17:09.000``）を **UTC 付き** の ``datetime`` に。"""
+    value = str((item.get("cve") or {}).get("published") or "")
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows のコンソール文字化け対策
 
-    parser = argparse.ArgumentParser(description="NVD から勧告索引を作る")
-    parser.add_argument("--keyword", default=DEFAULT_KEYWORD)
-    parser.add_argument(
+    arg_parser = argparse.ArgumentParser(description="NVD から勧告索引を作る")
+    arg_parser.add_argument(
+        "--source",
+        choices=("keyword", "cpe"),
+        default="keyword",
+        help="keyword=WordPress プラグイン（本文解析）/ cpe=PHP・フレームワーク（CPE の範囲）",
+    )
+    arg_parser.add_argument("--keyword", default=DEFAULT_KEYWORD)
+    arg_parser.add_argument(
+        "--products",
+        default=",".join(CPE_PRODUCTS),
+        help="--source cpe のときの対象製品（カンマ区切り）",
+    )
+    arg_parser.add_argument(
         "--days",
         type=int,
         default=DEFAULT_DAYS,
         help=f"公開日が何日前までか（既定 {DEFAULT_DAYS} 日 = 約 1 年）",
     )
-    parser.add_argument(
+    arg_parser.add_argument(
         "--all",
         action="store_true",
         help="全期間（2005 年以降）を取得する。120 日ずつ分割するので数分かかる",
     )
-    parser.add_argument(
+    arg_parser.add_argument(
         "--merge", action="store_true", help="既存の索引に足し込む（重複は CVE と名前で除く）"
     )
-    parser.add_argument("--limit", type=int, default=0, help="取得する CVE の上限（0=無制限）")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    args = parser.parse_args(argv)
+    arg_parser.add_argument("--limit", type=int, default=0, help="取得する CVE の上限（0=無制限）")
+    arg_parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    args = arg_parser.parse_args(argv)
 
     end = datetime.now(UTC)
     days = None if args.all else args.days
+    start = end - timedelta(days=days) if days is not None else FULL_START
     windows = _windows(days, end)
+    label = "全期間" if days is None else f"直近 {days} 日"
 
     client = NvdClient()
-    label = "全期間" if days is None else f"直近 {days} 日"
-    print(
-        f"NVD から取得: keyword={args.keyword!r} / {label}（{len(windows)} 分割） / "
-        f"キー={'あり' if client.authenticated else 'なし'}（間隔 {client.interval} 秒）"
-    )
-
     items: list[dict[str, Any]] = []
+    parser_fn = parse_cves
+
     try:
-        for start, window_end in windows:
-            params = _params(args.keyword, start, window_end)
-            for item in client.iter_cves(page_size=2000, **params):
-                items.append(item)
+        if args.source == "cpe":
+            products = [p.strip() for p in args.products.split(",") if p.strip()]
+            unknown = sorted({p for p in products if p not in CPE_PRODUCTS})
+            if unknown:
+                print(
+                    f"未対応の製品: {', '.join(unknown)}"
+                    f"（対応: {', '.join(sorted(CPE_PRODUCTS))}）"
+                )
+                return 1
+            cpes = [cpe for product in products for cpe in CPE_PRODUCTS[product]]
+            parser_fn = parse_cpe_cve
+            print(
+                f"NVD から取得: CPE（{', '.join(products)}）/ {label} / "
+                f"キー={'あり' if client.authenticated else 'なし'}（間隔 {client.interval} 秒）"
+            )
+            # NVD は CPE 指定と期間指定の同時利用に対応していない（404）。
+            # 全件を取り、公開日でこちら側で絞る。
+            # ページを大きくすると NVD が 503 を返すため、小さめに分けて取る。
+            for cpe in cpes:
+                found = 0
+                for item in client.iter_cves(page_size=CPE_PAGE_SIZE, virtualMatchString=cpe):
+                    published = published_at(item)
+                    if published is not None and published < start:
+                        continue
+                    items.append(item)
+                    found += 1
+                    if args.limit and len(items) >= args.limit:
+                        break
+                print(f"  {cpe}: {found} 件（累計 {len(items)} 件）")
                 if args.limit and len(items) >= args.limit:
                     break
-            print(f"  {start:%Y-%m-%d} 〜 {window_end:%Y-%m-%d}: 累計 {len(items)} 件")
-            if args.limit and len(items) >= args.limit:
-                break
+        else:
+            print(
+                f"NVD から取得: keyword={args.keyword!r} / {label}（{len(windows)} 分割） / "
+                f"キー={'あり' if client.authenticated else 'なし'}（間隔 {client.interval} 秒）"
+            )
+            for window_start, window_end in windows:
+                params = _params(args.keyword, window_start, window_end)
+                for item in client.iter_cves(page_size=2000, **params):
+                    items.append(item)
+                    if args.limit and len(items) >= args.limit:
+                        break
+                print(
+                    f"  {window_start:%Y-%m-%d} 〜 {window_end:%Y-%m-%d}: 累計 {len(items)} 件"
+                )
+                if args.limit and len(items) >= args.limit:
+                    break
     except (RuntimeError, httpx.HTTPError) as exc:
         print(f"取得に失敗しました: {exc}")
         return 1
     finally:
         client.close()
 
-    stats = summarize(items)
-    index = build_index(items)
+    stats = summarize(items, parser_fn)
+    index = build_index(items, parser=parser_fn)
     if args.merge and args.out.exists():
         try:
             base = AdvisoryIndex.load(args.out)
@@ -397,6 +574,10 @@ def main(argv: list[str] | None = None) -> int:
             f"既存の索引に足しました: {len(base.advisories)} + {before}"
             f" → {len(index.advisories)} 件"
         )
+    elif index.lifecycles is None and args.out.exists():
+        # 索引を作り直しても、別コマンドで足したライフサイクルは消さない
+        with contextlib.suppress(ValueError):
+            index.lifecycles = AdvisoryIndex.load(args.out).lifecycles
     save(index, args.out)
 
     print(
@@ -409,8 +590,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  除外理由: {key} … {value} 件")
     below = sum(1 for a in index.advisories if a.affected_below)
     upto = sum(1 for a in index.advisories if a.affected_upto)
+    at_or_above = sum(1 for a in index.advisories if a.affected_at_or_above)
     with_cvss = sum(1 for a in index.advisories if a.cvss is not None)
-    print(f"  affected_below {below} 件 / affected_upto {upto} 件 / CVSS あり {with_cvss} 件")
+    print(
+        f"  affected_below {below} 件 / affected_upto {upto} 件"
+        f" / affected_at_or_above {at_or_above} 件 / CVSS あり {with_cvss} 件"
+    )
     print(f"\n出力: {args.out}")
     return 0
 

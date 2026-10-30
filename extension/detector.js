@@ -27,6 +27,27 @@ const LIB_TOKENS = [
   ["gsap", ["gsap", "tweenmax", "tweenlite"]],
 ];
 
+/** サーバ側フレームワークの目印（版はほぼ取れないので version は null）。 */
+const FRAMEWORK_SIGNALS = [
+  ["django", ["csrfmiddlewaretoken"], 0.6],
+  ["rails", ['name="authenticity_token"', 'content="authenticity_token"'], 0.6],
+  ["laravel", ["laravel_session", "laravel/framework"], 0.5],
+  ["nuxt", ["__nuxt__"], 0.6],
+];
+
+export function detectFrameworks(htmlLower) {
+  const findings = [];
+  for (const [name, needles, confidence] of FRAMEWORK_SIGNALS) {
+    const matched = needles.filter((needle) => htmlLower.includes(needle));
+    if (matched.length) {
+      findings.push(
+        finding("framework", name, null, confidence, matched.map((n) => `dom:${n}`)),
+      );
+    }
+  }
+  return findings;
+}
+
 /** プラグイン名として扱う最小文字数（短すぎる slug は前方一致させない）。 */
 export const MIN_PREFIX_MATCH = 6;
 
@@ -179,6 +200,32 @@ export function detectServer(headers) {
  *
  * @param {{url: string, html?: string, resources?: string[], headers?: Record<string,string>}} evidence
  */
+/**
+ * 「判定できなかったこと」の一覧。入力で版が埋まったら作り直すため、単独で呼べるようにする。
+ */
+export function buildNotes(findings) {
+  const notes = [];
+  if (!findings.some((item) => item.kind === "platform")) {
+    notes.push("プラットフォームを判定できませんでした");
+  }
+  const unknown = findings
+    .filter((item) => item.kind === "plugin" && !item.version)
+    .map((item) => item.name);
+  if (unknown.length) {
+    notes.push(`バージョンが分からないプラグイン: ${unknown.join(", ")}（灰判定になります）`);
+  }
+  if (!findings.some((item) => item.kind === "language")) {
+    notes.push("PHP のバージョンは取得できませんでした（分かる場合は入力してください）");
+  }
+  const frameworks = findings
+    .filter((item) => item.kind === "framework" && !item.version)
+    .map((item) => item.name);
+  if (frameworks.length) {
+    notes.push(`フレームワークの版は外から分かりません: ${frameworks.join(", ")}（入力すると判定できます）`);
+  }
+  return notes;
+}
+
 export function analyze(evidence) {
   const { url = "", html = "", resources = [], headers = {} } = evidence;
   const htmlLower = String(html).toLowerCase();
@@ -191,24 +238,11 @@ export function analyze(evidence) {
     ...detectPlugins(resources, html),
     ...detectThemes(resources, html),
     ...detectLibraries(resources),
+    ...detectFrameworks(htmlLower),
     ...detectServer(headers),
   ].filter(Boolean);
 
-  const notes = [];
-  if (!findings.some((item) => item.kind === "platform")) {
-    notes.push("プラットフォームを判定できませんでした");
-  }
-  const unknown = findings
-    .filter((item) => item.kind === "plugin" && !item.version)
-    .map((item) => item.name);
-  if (unknown.length) {
-    notes.push(`バージョンが分からないプラグイン: ${unknown.join(", ")}（灰判定になります）`);
-  }
-  if (!findings.some((item) => item.kind === "language")) {
-    notes.push("PHP のバージョンは取得できませんでした（ヘッダ非公開）");
-  }
-
-  return { url, findings, notes };
+  return { url, findings, notes: buildNotes(findings) };
 }
 
 export function detectPlugins(resources, html) {

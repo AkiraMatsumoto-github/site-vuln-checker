@@ -17,9 +17,11 @@
 ```powershell
 cd C:\Users\yahoo\dev\site-vuln-checker
 
-# NVD から索引を作り、KEV / EPSS を付ける
-uv run svc-ingest --days 14 --limit 200 --out out/advisories.json
+# NVD から索引を作り、KEV / EPSS / EOL を付ける
+uv run svc-ingest --out out/advisories.json
+uv run svc-ingest --source cpe --products php,wordpress,laravel,symfony --merge --out out/advisories.json
 uv run svc-enrich --index out/advisories.json
+uv run svc-eol --out out/advisories.json
 
 # ローカルで配信する（別のターミナルで）
 python -m http.server 8000
@@ -42,16 +44,20 @@ http://localhost:8000/out/advisories.json
    - **更新すべきもの**: 🔴 赤 / 🟡 黄 / ⚪ 灰（判定不能）/ — 該当なし
    - **構成**: 基盤・コア・プラグイン・テーマ・JS ライブラリ・言語・サーバ
    - **判定できなかったこと**: 版が不明、PHP 不明 など
-4. アイコンのバッジに、赤（または黄・灰）の件数が出る
+4. アイコンに、赤（または黄・灰）の件数が出る
+5. **PHP やフレームワークの版が分かる場合**は「バージョンを入力」に入れて **追加**。
+   そのサイトのぶんだけ保存され、サポート終了（EOL）と本体の脆弱性を判定する
 
 ## 制約（正直な限界）
 
 | 制約 | 理由 |
 | --- | --- |
-| **PHP のバージョンは取れない** | ヘッダを読む権限（`webRequest`）を要求していないため。`X-Powered-By` は MV3 の案 A では見えない |
+| **PHP のバージョンは外から取れない** | ヘッダを読む権限（`webRequest`）を要求していないため。**画面から入力**すれば判定できる |
+| フレームワークの版も外から取れない | 目印（`csrfmiddlewaretoken` など）から名前だけ推定する。版は入力式 |
 | 管理画面専用プラグインは検出できない | フロントにアセットを出さないため |
 | 有効/無効の断定はしない | 本文中の文字列だけで見つけたものは「有効」と表示しない（`active=null`） |
 | 「緑」は安全を意味しない | 判定は**推定**。検出できた範囲の話でしかない |
+| CodeIgniter の EOL は出せない | endoflife.date にデータが無い（CVE の判定は可能） |
 
 ## テスト
 

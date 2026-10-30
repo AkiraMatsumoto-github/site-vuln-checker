@@ -42,8 +42,19 @@ export function compareVersions(left, right) {
   return 0;
 }
 
-/** バージョンが勧告の影響範囲に入るか。 */
+/**
+ * バージョンが勧告の影響範囲に入るか。
+ *
+ * CPE（NVD の構造化データ）に由来する勧告は**下限**を持つ
+ * （例: PHP は「7.3.0 以上 8.2.35 未満」）。下限より下を影響ありとしない。
+ */
 export function isAffected(version, advisory) {
+  if (
+    advisory.affected_at_or_above &&
+    compareVersions(version, advisory.affected_at_or_above) < 0
+  ) {
+    return false;
+  }
   if (advisory.affected_below && compareVersions(version, advisory.affected_below) < 0) return true;
   return Boolean(advisory.affected_upto && compareVersions(version, advisory.affected_upto) <= 0);
 }
@@ -68,71 +79,168 @@ function levelFor(affected) {
   return LEVEL.YELLOW;
 }
 
+/** サポート終了が「近い」とみなす日数（Python 版と同じ）。 */
+export const EOL_SOON_DAYS = 90;
+/** ライフサイクル（EOL）を判定する種別。プラグインは系統を持たないので対象外。 */
+export const LIFECYCLE_KINDS = ["core", "language", "framework", "library"];
+/** 勧告（CVE）で判定する種別。 */
+export const ADVISORY_KINDS = ["plugin", "theme", "core", "language", "framework"];
+
+/** ``2025-12-31`` を UTC のミリ秒に（読めなければ null）。 */
+function parseDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ""));
+  if (!match) return null;
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+/** EOL 判定の説明文（画面と CLI で同じ言い方にする）。 */
+export function lifecycleNote(status) {
+  if (status.state === "eol") {
+    return `${status.eol} にサポート終了（${status.cycle} 系に修正版は提供されません）`;
+  }
+  if (status.state === "eol_soon") {
+    return `${status.eol} にサポート終了予定（まもなく修正版が出なくなります）`;
+  }
+  if (status.state === "outdated") {
+    return `同一系統の最新は ${status.latest}（パッチ未適用の可能性）`;
+  }
+  return "";
+}
+
+/** 1 コンポーネントを勧告（CVE）と突き合わせる。 */
+function judgeAdvisories(component, index) {
+  const advisories = index ? index.advisoriesFor(component) : [];
+
+  if (!component.version) {
+    // 版が分からない = 判定不能。勧告の履歴があるものだけ灰で知らせる。
+    if (!advisories.length) return null;
+    return {
+      component: component.name,
+      version: null,
+      level: LEVEL.GRAY,
+      action: "バージョンを確認する",
+      advisories,
+      note: `過去に ${advisories.length} 件の勧告あり。版が不明なため判定できません`,
+    };
+  }
+
+  const affected = advisories.filter((advisory) => isAffected(component.version, advisory));
+  if (!affected.length) {
+    if (!advisories.length) return null;
+    return {
+      component: component.name,
+      version: component.version,
+      level: LEVEL.NONE,
+      action: "該当なし（勧告は修正版以降）",
+      advisories,
+      note: "",
+    };
+  }
+
+  const fixed = [...new Set(affected.map((advisory) => advisory.fixed).filter(Boolean))].sort(
+    compareVersions,
+  );
+  return {
+    component: component.name,
+    version: component.version,
+    level: levelFor(affected),
+    action: fixed.length ? `→ ${fixed[fixed.length - 1]} へ更新` : "修正版不明（ベンダに確認）",
+    advisories: [...affected].sort(
+      (a, b) => Number(!a.kev) - Number(!b.kev) || (b.cvss ?? 0) - (a.cvss ?? 0),
+    ),
+    note: "",
+  };
+}
+
+/** サポート終了（軸B）の判定。脆弱性が 0 件でも「移行が必要」を出す。 */
+function judgeLifecycle(component, lifecycles, today) {
+  if (!lifecycles || !component.version) return null;
+  if (!LIFECYCLE_KINDS.includes(component.kind)) return null;
+
+  const status = lifecycles.check(component.name, component.version, today);
+  if (!status || status.state === "supported" || status.state === "unknown") return null;
+
+  let level = LEVEL.NONE;
+  let action;
+  if (status.state === "eol") {
+    action = status.moveTo ? `→ ${status.moveTo} 以降へ移行` : "→ サポート中の系統へ移行";
+    level = LEVEL.YELLOW;
+  } else if (status.state === "eol_soon") {
+    action = status.moveTo ? `→ ${status.moveTo} 以降へ更新` : "→ サポート中の系統へ更新";
+    level = LEVEL.YELLOW;
+  } else {
+    action = `→ ${status.latest} へ更新（同一系統）`;
+  }
+
+  return {
+    component: component.name,
+    version: component.version,
+    level,
+    action,
+    advisories: [],
+    note: lifecycleNote(status),
+  };
+}
+
+/** 同じコンポーネントの 2 つの判定（脆弱性・EOL）を 1 行にまとめる。
+ *
+ * ``right`` はライフサイクル（EOL）の判定。**移行の提案を先に**出す
+ * （サポートが終わった枝にパッチを当てても長くはもたないため）。
+ */
+function mergeJudgements(left, right) {
+  const level = LEVEL_ORDER[left.level] <= LEVEL_ORDER[right.level] ? left.level : right.level;
+  const actions = [...new Set([right.action, left.action].filter(Boolean))];
+  const notes = [...new Set([left.note, right.note].filter(Boolean))];
+  const advisories = new Map();
+  for (const advisory of [...(left.advisories || []), ...(right.advisories || [])]) {
+    advisories.set(advisory.id, advisory);
+  }
+  return {
+    component: left.component,
+    version: left.version ?? right.version,
+    level,
+    action: actions.join(" / "),
+    advisories: [...advisories.values()],
+    note: notes.join("。"),
+  };
+}
+
 /**
  * 検出結果と索引を突き合わせて、コンポーネントごとの判定を返す。
  *
+ * 2 軸で見る: 軸A=既知の脆弱性、軸B=サポート終了（EOL）。
+ * 同じコンポーネントに両方が当たったら 1 行にまとめ、重い方を採用する。
+ *
  * @param {{findings: Array}} analysis
  * @param {AdvisoryIndex|null} index
+ * @param {Date} [today] テスト用に日付を固定できる
  */
-export function judge(analysis, index) {
+export function judge(analysis, index, today = new Date()) {
+  const findings = analysis?.findings || [];
   const judgements = [];
-  const components = (analysis?.findings || []).filter(
-    (item) => item.kind === "plugin" || item.kind === "theme",
-  );
 
-  for (const component of components) {
-    const advisories = index ? index.advisoriesFor(component) : [];
-
-    if (!component.version) {
-      // 版が分からない = 判定不能。勧告の履歴があるものだけ灰で知らせる。
-      if (advisories.length) {
-        judgements.push({
-          component: component.name,
-          version: null,
-          level: LEVEL.GRAY,
-          action: "バージョンを確認する",
-          advisories,
-          note: `過去に ${advisories.length} 件の勧告あり。版が不明なため判定できません`,
-        });
-      }
-      continue;
-    }
-
-    const affected = advisories.filter((advisory) => isAffected(component.version, advisory));
-    if (!affected.length) {
-      if (advisories.length) {
-        judgements.push({
-          component: component.name,
-          version: component.version,
-          level: LEVEL.NONE,
-          action: "該当なし（勧告は修正版以降）",
-          advisories,
-          note: "",
-        });
-      }
-      continue;
-    }
-
-    const fixed = [...new Set(affected.map((advisory) => advisory.fixed).filter(Boolean))].sort(
-      compareVersions,
-    );
-    judgements.push({
-      component: component.name,
-      version: component.version,
-      level: levelFor(affected),
-      action: fixed.length ? `→ ${fixed[fixed.length - 1]} へ更新` : "修正版不明（ベンダに確認）",
-      advisories: [...affected].sort(
-        (a, b) => Number(!a.kev) - Number(!b.kev) || (b.cvss ?? 0) - (a.cvss ?? 0),
-      ),
-      note: "",
-    });
+  for (const component of findings) {
+    if (!ADVISORY_KINDS.includes(component.kind)) continue;
+    const judgement = judgeAdvisories(component, index);
+    if (judgement) judgements.push(judgement);
+  }
+  for (const component of findings) {
+    const judgement = judgeLifecycle(component, index?.lifecycles ?? null, today);
+    if (judgement) judgements.push(judgement);
   }
 
-  judgements.sort(
+  const merged = new Map();
+  for (const judgement of judgements) {
+    const key = normalizeSlug(judgement.component);
+    const existing = merged.get(key);
+    merged.set(key, existing ? mergeJudgements(existing, judgement) : judgement);
+  }
+
+  return [...merged.values()].sort(
     (a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level] || a.component.localeCompare(b.component),
   );
-  return judgements;
 }
+
 
 export function summarizeLevels(judgements) {
   const counts = { red: 0, yellow: 0, gray: 0, none: 0 };
@@ -146,6 +254,8 @@ export class AdvisoryIndex {
   constructor(advisories = [], generatedAt = null) {
     this.advisories = advisories;
     this.generatedAt = generatedAt;
+    /** サポート終了（EOL）情報。索引 JSON の ``lifecycles`` から読む。 */
+    this.lifecycles = null;
     this._byKey = new Map();
     this._byName = new Map();
     for (const advisory of advisories) {
@@ -162,8 +272,11 @@ export class AdvisoryIndex {
   }
 
   static fromJSON(data) {
-    const advisories = Array.isArray(data) ? data : data?.advisories || [];
-    return new AdvisoryIndex(advisories, Array.isArray(data) ? null : data?.generated_at ?? null);
+    const isArray = Array.isArray(data);
+    const advisories = isArray ? data : data?.advisories || [];
+    const index = new AdvisoryIndex(advisories, isArray ? null : (data?.generated_at ?? null));
+    index.lifecycles = isArray ? null : LifecycleIndex.fromJSON(data?.lifecycles);
+    return index;
   }
 
   get size() {
@@ -174,7 +287,12 @@ export class AdvisoryIndex {
     return [...(this._byKey.get(normalizeSlug(nameOrSlug)) || [])];
   }
 
-  /** 検出結果に該当しうる勧告を探す（slug 完全一致 → 表示名完全一致 → 前方一致）。 */
+  /**
+   * 検出結果に該当しうる勧告を探す（slug 完全一致 → 表示名完全一致 → 前方一致）。
+   *
+   * 前方一致は**プラグインとテーマだけ**。``wordpress``（コア）に許すと
+   * 「WordPress User Extra Fields」のようなプラグイン名を拾って誤検知になる。
+   */
   advisoriesFor(component) {
     const slug = normalizeSlug(component.name || "");
     const byKey = this._byKey.get(slug);
@@ -183,6 +301,7 @@ export class AdvisoryIndex {
     const byName = this._byName.get(slug);
     if (byName) return [...byName];
 
+    if (component.kind !== "plugin" && component.kind !== "theme") return [];
     if (slug.length < MIN_PREFIX_MATCH) return [];
 
     const prefix = `${slug}-`;
@@ -195,3 +314,96 @@ export class AdvisoryIndex {
     return matched;
   }
 }
+
+/**
+ * サポート終了（EOL）情報。索引 JSON の ``lifecycles`` をそのまま使う。
+ *
+ * 形式: ``{products: {php: {name: "PHP", cycles: [{cycle, eol, latest}]}}}``
+ */
+export class LifecycleIndex {
+  constructor(products = {}) {
+    this.products = products;
+    this._byAlias = new Map();
+    for (const [key, value] of Object.entries(products)) {
+      const entry = { key, ...value };
+      this._byAlias.set(key.toLowerCase(), entry);
+      if (value?.name) this._byAlias.set(String(value.name).toLowerCase(), entry);
+    }
+  }
+
+  static fromJSON(data) {
+    if (!data || typeof data !== "object") return null;
+    const products = data.products && typeof data.products === "object" ? data.products : data;
+    const entries = Object.entries(products).filter(
+      ([, value]) => value && typeof value === "object" && Array.isArray(value.cycles),
+    );
+    return entries.length ? new LifecycleIndex(Object.fromEntries(entries)) : null;
+  }
+
+  get size() {
+    return Object.keys(this.products).length;
+  }
+
+  /**
+   * ``version`` の状態を返す（``eol`` / ``eol_soon`` / ``outdated`` / ``supported`` / ``unknown``）。
+   * 対象外の製品は ``null``。
+   */
+  check(product, version, today = new Date()) {
+    const lifecycle = this._byAlias.get(String(product ?? "").trim().toLowerCase());
+    if (!lifecycle) return null;
+
+    const name = lifecycle.name || product;
+    const cycles = [...(lifecycle.cycles || [])].sort(
+      (a, b) => String(b.cycle).split(".").length - String(a.cycle).split(".").length,
+    );
+    const digits = String(version ?? "")
+      .trim()
+      .replace(/^[vV]/, "")
+      .replace(/-/g, ".")
+      .split(".")
+      .filter(Boolean)
+      .map((part) => (/^\d+$/.test(part) ? String(Number(part)) : part));
+
+    const cycle = cycles.find((candidate) => {
+      const width = String(candidate.cycle).split(".").length;
+      return digits.length >= width && digits.slice(0, width).join(".") === String(candidate.cycle);
+    });
+    if (!cycle) return { product, name, version, state: "unknown" };
+
+    const todayTs = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+    const eolTs = parseDate(cycle.eol);
+    const behind = Boolean(cycle.latest && compareVersions(version, cycle.latest) < 0);
+
+    let state = "supported";
+    if (eolTs !== null) {
+      if (eolTs < todayTs) state = "eol";
+      else if ((eolTs - todayTs) / 86400000 <= EOL_SOON_DAYS) state = "eol_soon";
+      else if (behind) state = "outdated";
+    } else if (behind) {
+      state = "outdated";
+    }
+
+    let moveTo = null;
+    if (state === "eol" || state === "eol_soon") {
+      const alive = cycles
+        .filter((candidate) => {
+          const ts = parseDate(candidate.eol);
+          return (ts === null || ts >= todayTs) && candidate.latest;
+        })
+        .sort((a, b) => compareVersions(b.cycle, a.cycle));
+      if (alive.length) moveTo = alive[0].latest;
+    }
+
+    return {
+      product,
+      name,
+      version,
+      state,
+      cycle: cycle.cycle,
+      eol: cycle.eol ?? null,
+      latest: cycle.latest ?? null,
+      moveTo,
+    };
+  }
+}
+

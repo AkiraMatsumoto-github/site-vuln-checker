@@ -308,6 +308,26 @@ def _detect_libraries(resources: list[str]) -> list[Finding]:
     return sorted(found.values(), key=lambda f: f.name)
 
 
+def _detect_frameworks(html_lower: str) -> list[Finding]:
+    """サーバ側フレームワークの推定（版はほぼ取れないので ``version=None``）。
+
+    外部から見えるのは**フレームワークが出力する目印**だけ。版は分からないことが
+    多いため、確定できない場合は灰のままにする（拡張では手入力で補える）。
+    """
+    signals: tuple[tuple[str, tuple[str, ...], float], ...] = (
+        ("django", ("csrfmiddlewaretoken",), 0.6),
+        ("rails", ('name="authenticity_token"', 'content="authenticity_token"'), 0.6),
+        ("laravel", ("laravel_session", "laravel/framework"), 0.5),
+        ("nuxt", ("__nuxt__",), 0.6),
+    )
+    findings: list[Finding] = []
+    for name, needles, confidence in signals:
+        matched = tuple(f"dom:{needle}" for needle in needles if needle in html_lower)
+        if matched:
+            findings.append(Finding("framework", name, None, confidence, matched))
+    return findings
+
+
 def _detect_server(headers: dict[str, str]) -> list[Finding]:
     """``X-Powered-By`` / ``Server`` から PHP と Web サーバを推定する。"""
     findings: list[Finding] = []
@@ -353,6 +373,7 @@ def analyze(url: str, html: str, headers: dict[str, str] | None = None) -> Analy
     analysis.findings.extend(_detect_plugins(resources, html))
     analysis.findings.extend(_detect_themes(resources, html))
     analysis.findings.extend(_detect_libraries(resources))
+    analysis.findings.extend(_detect_frameworks(html_lower))
     analysis.findings.extend(_detect_server(headers))
 
     if not analysis.platforms:

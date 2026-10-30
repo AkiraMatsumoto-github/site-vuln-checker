@@ -19,6 +19,7 @@ svc-survey = "site_vuln_checker.survey:main"
 svc-report = "site_vuln_checker.report:main"
 svc-ingest = "site_vuln_checker.ingest:main"
 svc-enrich = "site_vuln_checker.enrich:main"
+svc-eol = "site_vuln_checker.eol:main"
 
 [build-system]
 requires = ["uv_build>=0.11.1,<0.12.0"]

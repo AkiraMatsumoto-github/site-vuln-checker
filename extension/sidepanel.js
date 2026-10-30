@@ -160,6 +160,83 @@ async function restore() {
   }
 }
 
+// --- 入力（PHP とフレームワークのバージョン）----------------------------------
+
+const PRODUCT_LABEL = {
+  php: "PHP",
+  wordpress: "WordPress",
+  laravel: "Laravel",
+  symfony: "Symfony",
+  codeigniter: "CodeIgniter",
+  cakephp: "CakePHP",
+  django: "Django",
+  rails: "Ruby on Rails",
+};
+
+function renderVersions(versions) {
+  const list = $("versionList");
+  list.replaceChildren();
+  const entries = Object.entries(versions || {});
+  if (!entries.length) {
+    list.append(element("li", "chip empty", "未入力（外から分かる範囲だけで判定します）"));
+    return;
+  }
+  for (const [product, version] of entries) {
+    const item = element("li", "chip");
+    item.append(element("span", "", `${PRODUCT_LABEL[product] ?? product} ${version}`));
+    const remove = element("button", "chip-remove", "×");
+    remove.type = "button";
+    remove.title = "入力を削除";
+    remove.addEventListener("click", async () => {
+      await chrome.runtime.sendMessage({ type: "setVersion", product, version: "" });
+      await loadVersions();
+      await inspect();
+    });
+    item.append(remove);
+    list.append(item);
+  }
+}
+
+async function loadVersions() {
+  const result = await chrome.runtime
+    .sendMessage({ type: "versions" })
+    .catch(() => ({ versions: {} }));
+  renderVersions(result?.versions ?? {});
+  return result?.versions ?? {};
+}
+
+async function addVersion() {
+  const product = $("product").value;
+  const version = $("version").value.trim();
+  if (!version) {
+    $("status").textContent = "バージョンを入力してください（例: 8.1.27）";
+    return;
+  }
+  if (!/^\d+(\.\d+)*/i.test(version)) {
+    $("status").textContent = "バージョンの形式を確認してください（例: 8.1.27）";
+    return;
+  }
+  const result = await chrome.runtime.sendMessage({ type: "setVersion", product, version });
+  if (result?.error) {
+    $("status").textContent = result.error;
+    return;
+  }
+  $("version").value = "";
+  renderVersions(result?.versions ?? {});
+  $("status").textContent = "入力を反映して判定し直しました";
+  await inspect();
+}
+
+$("addVersion").addEventListener("click", () => {
+  addVersion().catch((error) => {
+    $("status").textContent = `失敗しました: ${String(error?.message ?? error)}`;
+  });
+});
+$("version").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") addVersion().catch(() => {});
+});
+
 $("inspect").addEventListener("click", inspect);
 $("options").addEventListener("click", () => chrome.runtime.openOptionsPage());
 restore();
+loadVersions().catch(() => {});

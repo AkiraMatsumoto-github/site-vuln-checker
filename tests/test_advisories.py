@@ -4,6 +4,7 @@
 実際の取り込み（NVD / OSV）は別コマンドで行い、ここでは**照合と判定**だけを固定する。
 """
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from site_vuln_checker.advisories import (
     summarize,
 )
 from site_vuln_checker.detect import Analysis, Finding, analyze
+from site_vuln_checker.eol import Cycle, Lifecycle, LifecycleIndex
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -182,3 +184,130 @@ def test_prefix_lookup_scales_to_large_index() -> None:
     # 名前の完全一致も拾える
     found_exact = index.advisories_for(Finding("plugin", "plugin-number-10", None, 0.6))
     assert [a.id for a in found_exact] == ["CVE-2026-00010"]
+
+
+# --- CPE 由来の下限つき範囲（PHP 本体・フレームワーク）-----------------------------
+
+
+def test_lower_bound_is_respected() -> None:
+    """CPE の下限（``7.3.0 以上``）より下の版を「影響あり」としない。"""
+    advisory = Advisory(
+        id="CVE-2026-109618",
+        name="PHP",
+        slug="php",
+        affected_at_or_above="7.3.0",
+        affected_below="8.2.35",
+        fixed="8.2.35",
+        cvss=9.8,
+    )
+    assert is_affected("8.1.27", advisory) is True
+    assert is_affected("8.2.35", advisory) is False
+    assert is_affected("7.2.34", advisory) is False  # 下限より下
+
+
+def test_php_cve_and_eol_are_merged_into_one_line() -> None:
+    """脆弱性（赤）と EOL（黄）が同じ PHP に当たったら 1 行にまとめる。"""
+    advisories = [
+        Advisory(
+            id="CVE-2026-109618",
+            name="PHP",
+            slug="php",
+            affected_at_or_above="7.3.0",
+            affected_below="8.2.35",
+            fixed="8.2.35",
+            cvss=9.8,
+        )
+    ]
+    lifecycles = LifecycleIndex(
+        products={
+            "php": Lifecycle(
+                product="php",
+                name="PHP",
+                cycles=[
+                    Cycle(cycle="8.5", eol="2029-12-31", latest="8.5.12"),
+                    Cycle(cycle="8.1", eol="2025-12-31", latest="8.1.34"),
+                ],
+            )
+        }
+    )
+    index = AdvisoryIndex(advisories=advisories, lifecycles=lifecycles)
+    analysis = Analysis(
+        url="https://example.com/",
+        findings=[Finding("language", "php", "8.1.27", 1.0, ("input:php",))],
+    )
+
+    judgements = judge(analysis, index, today=date(2026, 10, 29))
+    assert len(judgements) == 1
+    merged = judgements[0]
+    assert merged.level == LEVEL_RED  # 重い方（脆弱性）を採用
+    assert "8.2.35" in merged.action  # 修正版
+    assert "8.5.12" in merged.action  # 移行先
+    assert "サポート終了" in merged.note
+    assert [a.id for a in merged.advisories] == ["CVE-2026-109618"]
+
+
+def test_core_name_is_not_prefix_matched() -> None:
+    """コア名（wordpress）に前方一致を許すと、プラグイン名を拾って誤検知になる。
+
+    実データで ``WordPress User Extra Fields``（プラグイン）が WordPress コアに
+    紐づいた例があるため、コア・言語・フレームワークは完全一致のみにする。
+    """
+    index = AdvisoryIndex(
+        advisories=[
+            Advisory(
+                id="CVE-2025-7846",
+                name="WordPress User Extra Fields",
+                affected_upto="16.7",
+                cvss=8.8,
+            )
+        ]
+    )
+    core = Finding("core", "wordpress", "6.2.6", 1.0)
+    assert index.advisories_for(core) == []
+
+    plugin = Finding("plugin", "wordpress-user-extra-fields", "16.0", 0.8)
+    assert [a.id for a in index.advisories_for(plugin)] == ["CVE-2025-7846"]
+
+
+def test_eol_only_is_yellow_and_outdated_is_none() -> None:
+    """EOL は黄（更新すべき）、同一枝のパッチ遅れは「—」（情報のみ）。"""
+    lifecycles = LifecycleIndex(
+        products={
+            "php": Lifecycle(
+                product="php",
+                name="PHP",
+                cycles=[
+                    Cycle(cycle="8.5", eol="2029-12-31", latest="8.5.12"),
+                    Cycle(cycle="8.4", eol="2028-12-31", latest="8.4.27"),
+                    Cycle(cycle="8.1", eol="2025-12-31", latest="8.1.34"),
+                ],
+            )
+        }
+    )
+    index = AdvisoryIndex(lifecycles=lifecycles)
+
+    eol_only = judge(
+        Analysis(url="", findings=[Finding("language", "php", "8.1.27", 1.0)]),
+        index,
+        today=date(2026, 10, 29),
+    )
+    assert [j.level for j in eol_only] == [LEVEL_YELLOW]
+
+    outdated = judge(
+        Analysis(url="", findings=[Finding("language", "php", "8.4.20", 1.0)]),
+        index,
+        today=date(2026, 10, 29),
+    )
+    assert [j.level for j in outdated] == [LEVEL_NONE]
+    assert "8.4.27" in outdated[0].action
+
+
+def test_plugin_is_not_judged_by_lifecycle() -> None:
+    """プラグインは系統（cycle）を持たないので EOL 判定の対象外。"""
+    lifecycles = LifecycleIndex(
+        products={"php": Lifecycle(product="php", cycles=[Cycle(cycle="8.1", eol="2025-12-31")])}
+    )
+    index = AdvisoryIndex(lifecycles=lifecycles)
+    analysis = Analysis(url="", findings=[Finding("plugin", "php", "8.1.27", 0.8)])
+    assert judge(analysis, index, today=date(2026, 10, 29)) == []
+

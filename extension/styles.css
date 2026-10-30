@@ -204,3 +204,93 @@ footer {
 .meta {
   font-family: ui-monospace, Consolas, monospace;
 }
+
+/* --- バージョン入力 ------------------------------------------------------- */
+
+.versions {
+  margin-top: 12px;
+}
+
+.versions .hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.row select,
+.row input {
+  padding: 7px 8px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--fg);
+}
+
+.row select {
+  flex: 0 0 34%;
+}
+
+.row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.row button {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 8px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.chip.empty {
+  border-style: dashed;
+  color: var(--muted);
+  font-family: inherit;
+}
+
+.chip-remove {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  font-size: 12px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chip-remove:hover {
+  background: var(--line);
+  color: var(--fg);
+}

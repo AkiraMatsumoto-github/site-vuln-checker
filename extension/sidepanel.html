@@ -17,6 +17,28 @@
       <p id="status" class="status" role="status"></p>
     </header>
 
+    <section class="versions">
+      <h2>バージョンを入力（任意）</h2>
+      <p class="hint">
+        外からは分からない PHP やフレームワークの版を入れると、サポート終了と脆弱性を判定できます。
+      </p>
+      <div class="row">
+        <select id="product" aria-label="製品">
+          <option value="php">PHP</option>
+          <option value="wordpress">WordPress</option>
+          <option value="laravel">Laravel</option>
+          <option value="symfony">Symfony</option>
+          <option value="codeigniter">CodeIgniter</option>
+          <option value="cakephp">CakePHP</option>
+          <option value="django">Django</option>
+          <option value="rails">Ruby on Rails</option>
+        </select>
+        <input id="version" type="text" inputmode="text" placeholder="8.1.27" aria-label="バージョン" />
+        <button id="addVersion" type="button">追加</button>
+      </div>
+      <ul id="versionList" class="chips"></ul>
+    </section>
+
     <main id="result" hidden>
       <section>
         <h2>更新すべきもの</h2>

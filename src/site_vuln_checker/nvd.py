@@ -137,6 +137,11 @@ class NvdClient:
                     wait = max(wait, float(retry_after))
                 time.sleep(min(60.0, wait))
                 continue
+            if response.status_code in (502, 503, 504):
+                # NVD 側の一時的な混雑（大きなページを要求すると起きやすい）。待ってやり直す。
+                last_error = f"HTTP {response.status_code}"
+                time.sleep(min(30.0, 3.0 * attempt))
+                continue
             response.raise_for_status()
             return response.json()
 
