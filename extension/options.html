@@ -10,10 +10,11 @@
     <h1>設定</h1>
 
     <section>
-      <h2>脆弱性索引（advisories.json）</h2>
+      <h2>脆弱性索引（通常は自動で読み込みます）</h2>
       <p class="empty">
-        照合に使う索引の URL を指定します。索引は<strong>端末内に保存</strong>し、閲覧した URL は
-        どこにも送りません。
+        索引は<strong>「このサイトを調べる」を最初に押したときに自動で</strong>読み込まれ、端末内に保存されます。
+        通常はここを触る必要はありません。別の場所から読み込みたいときだけ URL を指定してください。
+        閲覧した URL はどこにも送りません。
       </p>
       <label for="url">索引の URL</label>
       <input id="url" type="url" placeholder="https://example.com/svc/advisories.json" />

@@ -12,7 +12,9 @@
 
 ## 索引（advisories.json）を用意する
 
-拡張は**索引をローカルに持って**照合します。まず Python 側で索引を作ります。
+拡張は**索引をローカルに持って**照合します。索引の場所は既定値が入っているので、
+**URL を入力する必要はありません**（「このサイトを調べる」の初回クリックで自動的に読み込みます）。
+別の場所から読みたいときだけ、設定画面で指定します。
 
 ```powershell
 cd C:\Users\yahoo\dev\site-vuln-checker
@@ -25,6 +27,13 @@ uv run svc-eol --out out/advisories.json
 
 # ローカルで配信する（別のターミナルで）
 python -m http.server 8000
+```
+
+拡張の既定の読み込み先は次の順です（`config.js`）。
+
+```
+http://localhost:8000/out/advisories.json                                   # ローカル配信
+https://github.com/.../releases/latest/download/advisories.json             # 配布用
 ```
 
 拡張の**設定**（サイドパネルの「設定」ボタン）で、索引の URL を入れて「保存して読み込む」：

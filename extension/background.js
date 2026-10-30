@@ -11,6 +11,7 @@
 // 方針（企画書 12.5）: 秘密（API キー）は持たない。通信は索引の取得だけ。
 
 import { AdvisoryIndex, judge, summarizeLevels } from "./advisor.js";
+import { INDEX_CANDIDATES } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
 import { originPattern } from "./patterns.js";
 
@@ -48,6 +49,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "refreshIndex") {
     refreshIndex()
+      .then(sendResponse)
+      .catch((error) => sendResponse({ error: String(error?.message ?? error) }));
+    return true;
+  }
+  if (message?.type === "loadIndex") {
+    // 指定 URL から索引を読む（利用者が「調べる」を押した流れで呼ばれる）
+    refreshIndex(message.url)
       .then(sendResponse)
       .catch((error) => sendResponse({ error: String(error?.message ?? error) }));
     return true;
@@ -238,10 +246,10 @@ async function loadIndex() {
   }
 }
 
-/** 索引を取り直す。URL は設定画面で指定する。 */
-async function refreshIndex() {
+/** 索引を取り直す。URL は保存済みのもの、または引数で指定したもの。 */
+async function refreshIndex(urlOverride) {
   const stored = await chrome.storage.local.get(INDEX_URL_KEY);
-  const url = stored[INDEX_URL_KEY];
+  const url = urlOverride ?? stored[INDEX_URL_KEY] ?? INDEX_CANDIDATES[0];
   if (!url) return { error: "索引の URL が未設定です（設定画面で指定してください）" };
 
   const response = await fetch(url, { cache: "no-store" });
@@ -252,9 +260,10 @@ async function refreshIndex() {
 
   await chrome.storage.local.set({
     [INDEX_KEY]: data,
+    [INDEX_URL_KEY]: url,
     indexUpdatedAt: new Date().toISOString(),
   });
-  return { count: index.size, generatedAt: index.generatedAt };
+  return { count: index.size, generatedAt: index.generatedAt, url };
 }
 
 /** 最も重い判定をバッジに出す（赤 > 黄 > 灰）。 */

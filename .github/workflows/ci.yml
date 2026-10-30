@@ -43,4 +43,4 @@ jobs:
           done
 
       - name: 単体テスト（Python 版と同じフィクスチャ）
-        run: node --test extension/tests/detector.test.mjs extension/tests/advisor.test.mjs
+        run: node --test extension/tests/detector.test.mjs extension/tests/advisor.test.mjs extension/tests/patterns.test.mjs

@@ -1,6 +1,7 @@
 // 設定画面。索引の URL を保存し、そのオリジンへのアクセス許可を取ってから読み込む。
 // `chrome.permissions.request` はユーザー操作（クリック）から呼ぶ必要がある。
 
+import { INDEX_CANDIDATES } from "./config.js";
 import { originPattern } from "./patterns.js";
 
 const $ = (id) => document.getElementById(id);
@@ -19,7 +20,8 @@ async function showStatus() {
 
 async function loadUrl() {
   const stored = await chrome.storage.local.get(["indexUrl"]);
-  $("url").value = stored.indexUrl ?? "";
+  // 通常は「このサイトを調べる」で自動的に読み込まれる。ここは控えの設定。
+  $("url").value = stored.indexUrl ?? INDEX_CANDIDATES[0] ?? "";
 }
 
 async function save() {

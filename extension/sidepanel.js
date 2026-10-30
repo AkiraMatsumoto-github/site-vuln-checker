@@ -1,6 +1,7 @@
 // サイドパネルの UI。判定は background が行い、ここは結果を描くだけ。
 // 値はすべて textContent で入れる（ページ由来の文字列を HTML として解釈しない）。
 
+import { INDEX_CANDIDATES } from "./config.js";
 import { originPattern } from "./patterns.js";
 
 const $ = (id) => document.getElementById(id);
@@ -196,12 +197,46 @@ async function refreshHeaderHint() {
   showRetryLink(Boolean(stored[DECLINED_KEY]?.[info.origin]));
 }
 
+// --- 索引（URL は打たせない）-------------------------------------------------
+
+/**
+ * 索引が未読込なら、候補 URL を順に試して**自動で**読み込む。
+ *
+ * 許可が要るので、ユーザー操作（「このサイトを調べる」）の流れでだけ呼ぶ。
+ */
+async function ensureIndexLoaded() {
+  const stored = await chrome.storage.local.get(["indexUpdatedAt"]).catch(() => ({}));
+  if (stored.indexUpdatedAt) return true;
+
+  for (const url of INDEX_CANDIDATES) {
+    const pattern = originPattern(url);
+    const granted = await chrome.permissions
+      .contains({ origins: [pattern] })
+      .catch(() => false);
+    const allowed =
+      granted || (await chrome.permissions.request({ origins: [pattern] }).catch(() => false));
+    if (!allowed) continue;
+
+    $("status").textContent = "索引を読み込んでいます…";
+    const result = await chrome.runtime.sendMessage({ type: "loadIndex", url }).catch(() => null);
+    if (result?.count) return true;
+  }
+  return false;
+}
+
 async function inspect({ askPermission = false } = {}) {
   const button = $("inspect");
   button.disabled = true;
   $("status").textContent = "調べています…";
   try {
-    if (askPermission) await askHeaderPermission();
+    if (askPermission) {
+      const loaded = await ensureIndexLoaded();
+      if (!loaded) {
+        $("status").textContent =
+          "索引を読み込めませんでした（配信が止まっている可能性があります。詳細は設定を確認してください）";
+      }
+      await askHeaderPermission();
+    }
     const report = await chrome.runtime.sendMessage({ type: "inspect" });
     if (report?.error) {
       $("status").textContent = report.error;
@@ -221,7 +256,7 @@ async function restore() {
   if (report) renderReport(report);
   const stored = await chrome.storage.local.get(["indexUpdatedAt"]).catch(() => ({}));
   if (!stored.indexUpdatedAt) {
-    $("status").textContent = "索引が未設定です。設定から索引の URL を読み込んでください。";
+    $("status").textContent = "初回のチェック時に、弱点の一覧表を自動で読み込みます。";
   }
 }
 
