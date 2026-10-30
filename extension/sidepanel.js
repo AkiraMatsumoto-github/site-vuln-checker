@@ -132,11 +132,74 @@ function renderReport(report) {
   $("meta").textContent = meta.join(" ／ ");
 }
 
-async function inspect() {
+// --- ヘッダの許可（初回だけ聞く）---------------------------------------------
+
+const DECLINED_KEY = "declinedOrigins";
+
+/**
+ * このサイトのヘッダを読む許可を、**初回だけ**求める。
+ *
+ * Chrome の仕様上、サイトごとの許可は**ユーザー操作からしか**要求できないため、
+ * 「このサイトを調べる」のクリック内で聞く（別ボタンは置かない）。
+ * 断られたら記録して、次からは黙って判定だけ続ける（何度も聞かない）。
+ */
+async function askHeaderPermission() {
+  const info = await chrome.runtime.sendMessage({ type: "versions" }).catch(() => null);
+  if (!info?.origin) return false;
+  const pattern = `${info.origin}/*`;
+
+  if (await chrome.permissions.contains({ origins: [pattern] }).catch(() => false)) return true;
+
+  const stored = await chrome.storage.local.get(DECLINED_KEY).catch(() => ({}));
+  const declined = stored[DECLINED_KEY] ?? {};
+  if (declined[info.origin]) {
+    // 以前に断られている。しつこく聞かず、必要なら小さなリンクから再要求できるようにする。
+    showRetryLink(true);
+    return false;
+  }
+
+  let granted = false;
+  try {
+    granted = await chrome.permissions.request({ origins: [pattern] });
+  } catch {
+    // 操作が古くなった等で要求できないことがある。判定は続ける。
+    return false;
+  }
+  if (granted) {
+    showRetryLink(false);
+    return true;
+  }
+
+  declined[info.origin] = true;
+  await chrome.storage.local.set({ [DECLINED_KEY]: declined }).catch(() => {});
+  showRetryLink(true);
+  return false;
+}
+
+function showRetryLink(show) {
+  const link = $("grantHeaders");
+  if (link) link.hidden = !show;
+}
+
+/** すでに許可済み／拒否済みの状態を画面に反映する（表示だけ）。 */
+async function refreshHeaderHint() {
+  const info = await chrome.runtime.sendMessage({ type: "versions" }).catch(() => null);
+  if (!info?.origin) return;
+  const pattern = `${info.origin}/*`;
+  if (await chrome.permissions.contains({ origins: [pattern] }).catch(() => false)) {
+    showRetryLink(false);
+    return;
+  }
+  const stored = await chrome.storage.local.get(DECLINED_KEY).catch(() => ({}));
+  showRetryLink(Boolean(stored[DECLINED_KEY]?.[info.origin]));
+}
+
+async function inspect({ askPermission = false } = {}) {
   const button = $("inspect");
   button.disabled = true;
   $("status").textContent = "調べています…";
   try {
+    if (askPermission) await askHeaderPermission();
     const report = await chrome.runtime.sendMessage({ type: "inspect" });
     if (report?.error) {
       $("status").textContent = report.error;
@@ -227,33 +290,25 @@ async function addVersion() {
   await inspect();
 }
 
-async function grantHeaders() {
+/** 断られたあとに、もう一度だけ許可を求める（リンクから明示的に押したとき）。 */
+async function retryHeaderPermission() {
   const info = await chrome.runtime.sendMessage({ type: "versions" }).catch(() => null);
   if (!info?.origin) {
     $("status").textContent = "http / https のページを開いてください";
     return;
   }
   const pattern = `${info.origin}/*`;
-  const granted = await chrome.permissions.request({ origins: [pattern] });
-  if (!granted) {
-    $("status").textContent = "許可されませんでした（ヘッダは読めません。入力で代替できます）";
-    return;
-  }
-  $("status").textContent = "このサイトのヘッダを読むようにしました";
-  await inspect();
-}
+  const stored = await chrome.storage.local.get(DECLINED_KEY).catch(() => ({}));
+  const declined = stored[DECLINED_KEY] ?? {};
+  delete declined[info.origin];
+  await chrome.storage.local.set({ [DECLINED_KEY]: declined }).catch(() => {});
 
-/** すでに許可済みならボタンを無効にする（許可の状態は permissions が持っている）。 */
-async function refreshHeaderButton() {
-  const info = await chrome.runtime.sendMessage({ type: "versions" }).catch(() => null);
-  if (!info?.origin) return;
-  const granted = await chrome.permissions
-    .contains({ origins: [`${info.origin}/*`] })
-    .catch(() => false);
-  if (granted) {
-    $("grantHeaders").disabled = true;
-    $("grantHeaders").textContent = "ヘッダを読む設定: 有効";
-  }
+  const granted = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
+  showRetryLink(!granted);
+  $("status").textContent = granted
+    ? "このサイトのヘッダを読むようにしました"
+    : "許可されませんでした（判定は続けられます）";
+  await inspect();
 }
 
 $("addVersion").addEventListener("click", () => {
@@ -265,13 +320,16 @@ $("version").addEventListener("keydown", (event) => {
   if (event.key === "Enter") addVersion().catch(() => {});
 });
 $("grantHeaders").addEventListener("click", () => {
-  grantHeaders().catch((error) => {
+  retryHeaderPermission().catch((error) => {
     $("status").textContent = `失敗しました: ${String(error?.message ?? error)}`;
   });
 });
 
-$("inspect").addEventListener("click", inspect);
+// 「調べる」のクリックで、初回だけヘッダの許可を聞く（ユーザー操作が必要なため）
+$("inspect").addEventListener("click", () => {
+  inspect({ askPermission: true }).catch(() => {});
+});
 $("options").addEventListener("click", () => chrome.runtime.openOptionsPage());
 restore();
 loadVersions().catch(() => {});
-refreshHeaderButton().catch(() => {});
+refreshHeaderHint().catch(() => {});
