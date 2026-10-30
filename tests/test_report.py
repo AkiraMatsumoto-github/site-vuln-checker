@@ -41,7 +41,9 @@ def _payload_with_judgement() -> dict:
                         "level": "red",
                         "action": "→ 5.9.9 へ更新",
                         "note": "",
-                        "advisories": [{"id": "CVE-2025-90001", "cvss": 9.8, "kev": True}],
+                        "advisories": [
+                            {"id": "CVE-2025-90001", "cvss": 9.8, "kev": True, "epss": 0.42}
+                        ],
                     }
                 ],
             }
@@ -54,6 +56,7 @@ def test_render_includes_judgement_section() -> None:
     assert "更新すべきもの（判定）" in html_text
     assert "CVE-2025-90001" in html_text
     assert "KEV" in html_text
+    assert "EPSS 42%" in html_text
     assert "→ 5.9.9 へ更新" in html_text
     assert "赤（要対応）" in html_text
 
