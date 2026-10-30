@@ -1,6 +1,8 @@
 // サイドパネルの UI。判定は background が行い、ここは結果を描くだけ。
 // 値はすべて textContent で入れる（ページ由来の文字列を HTML として解釈しない）。
 
+import { originPattern } from "./patterns.js";
+
 const $ = (id) => document.getElementById(id);
 
 const LEVEL_LABEL = {
@@ -146,7 +148,7 @@ const DECLINED_KEY = "declinedOrigins";
 async function askHeaderPermission() {
   const info = await chrome.runtime.sendMessage({ type: "versions" }).catch(() => null);
   if (!info?.origin) return false;
-  const pattern = `${info.origin}/*`;
+  const pattern = originPattern(info.origin);
 
   if (await chrome.permissions.contains({ origins: [pattern] }).catch(() => false)) return true;
 
@@ -185,7 +187,7 @@ function showRetryLink(show) {
 async function refreshHeaderHint() {
   const info = await chrome.runtime.sendMessage({ type: "versions" }).catch(() => null);
   if (!info?.origin) return;
-  const pattern = `${info.origin}/*`;
+  const pattern = originPattern(info.origin);
   if (await chrome.permissions.contains({ origins: [pattern] }).catch(() => false)) {
     showRetryLink(false);
     return;
@@ -297,7 +299,7 @@ async function retryHeaderPermission() {
     $("status").textContent = "http / https のページを開いてください";
     return;
   }
-  const pattern = `${info.origin}/*`;
+  const pattern = originPattern(info.origin);
   const stored = await chrome.storage.local.get(DECLINED_KEY).catch(() => ({}));
   const declined = stored[DECLINED_KEY] ?? {};
   delete declined[info.origin];

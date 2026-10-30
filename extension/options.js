@@ -1,6 +1,8 @@
 // 設定画面。索引の URL を保存し、そのオリジンへのアクセス許可を取ってから読み込む。
 // `chrome.permissions.request` はユーザー操作（クリック）から呼ぶ必要がある。
 
+import { originPattern } from "./patterns.js";
+
 const $ = (id) => document.getElementById(id);
 
 async function showStatus() {
@@ -29,7 +31,7 @@ async function save() {
 
   let origin;
   try {
-    origin = `${new URL(url).origin}/*`;
+    origin = originPattern(url);
   } catch {
     $("status").textContent = "URL の形式が正しくありません。";
     return;

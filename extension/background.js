@@ -12,6 +12,7 @@
 
 import { AdvisoryIndex, judge, summarizeLevels } from "./advisor.js";
 import { analyze, buildNotes } from "./detector.js";
+import { originPattern } from "./patterns.js";
 
 const REPORT_KEY = "lastReport";
 const INDEX_KEY = "index";
@@ -91,7 +92,7 @@ function collectEvidence() {
 async function readHeaders(url) {
   let pattern;
   try {
-    pattern = `${new URL(url).origin}/*`;
+    pattern = originPattern(url);
   } catch {
     return {};
   }
