@@ -3,15 +3,21 @@
 **ネットワークは使わない**。実際の NVD で観測された言い回しを固定する。
 """
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from site_vuln_checker.ingest import (
+    FULL_START,
+    _params,
+    _windows,
     build_index,
     extract_cvss,
     extract_name,
     extract_names,
     extract_range,
     is_plausible_name,
+    merge_index,
     parse_cve,
     parse_cves,
     summarize,
@@ -137,6 +143,53 @@ def test_build_index_keeps_multiple_plugins_per_cve() -> None:
     index = build_index(items)
     assert [a.name for a in index.advisories] == ["Foo", "Bar", "Baz"]
     assert summarize(items) == {"total": 1, "kept": 1, "skipped": 0, "advisories": 3}
+
+
+def test_params_without_window_has_no_dates() -> None:
+    """期間を指定しなければ日付パラメータを付けない。"""
+    assert set(_params("WordPress plugin")) == {"keywordSearch"}
+
+    start = datetime(2026, 10, 16, tzinfo=UTC)
+    end = datetime(2026, 10, 30, tzinfo=UTC)
+    params = _params("WordPress plugin", start, end)
+    assert params["pubStartDate"] == "2026-10-16T00:00:00.000"
+    assert params["pubEndDate"] == "2026-10-30T00:00:00.000"
+
+
+def test_windows_are_split_into_120_days() -> None:
+    """NVD の期間指定は 120 日まで。長い期間は分割する。"""
+    end = datetime(2026, 10, 30, tzinfo=UTC)
+    windows = _windows(365, end)
+    assert len(windows) == 4
+    assert windows[0][1] - windows[0][0] == timedelta(days=120)
+    assert windows[-1][1] == end
+
+    # 全期間（--days なし）は FULL_START から
+    assert _windows(None, end)[0][0] == FULL_START
+
+
+def test_merge_index_dedupes_by_cve_and_name() -> None:
+    """期間を分けて取った索引を積み上げるとき、重複を除いて足せる。"""
+    base = build_index([_item(DESC_BEFORE, "CVE-2026-0001")])
+    extra = build_index(
+        [_item(DESC_BEFORE, "CVE-2026-0001"), _item(DESC_MULTI, "CVE-2026-0009")],
+        generated_at="2026-10-30T00:00:00+00:00",
+    )
+    merged = merge_index(base, extra)
+    # 0001 は base と extra で重複するので 1 件。0009 は 3 プラグインぶん残る
+    assert [a.id for a in merged.advisories] == [
+        "CVE-2026-0001",
+        "CVE-2026-0009",
+        "CVE-2026-0009",
+        "CVE-2026-0009",
+    ]
+    assert [a.name for a in merged.advisories] == [
+        "Contact Form by Supsystic",
+        "Foo",
+        "Bar",
+        "Baz",
+    ]
+    assert merged.generated_at == "2026-10-30T00:00:00+00:00"
 
 
 def test_extract_cvss_prefers_newer_standard() -> None:

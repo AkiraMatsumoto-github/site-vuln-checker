@@ -20,6 +20,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from .advisories import Advisory, AdvisoryIndex
 from .nvd import NvdClient
 
@@ -249,6 +251,22 @@ def build_index(
     )
 
 
+def merge_index(base: AdvisoryIndex, extra: AdvisoryIndex) -> AdvisoryIndex:
+    """既存の索引に新しい索引を足す（CVE・名前の単位で重複を除く）。
+
+    NVD の全期間を一度に取るのは API 側が遅いため、**期間を分けて取得して積み上げる**。
+    """
+    seen: set[tuple[str, str]] = set()
+    merged: list[Advisory] = []
+    for advisory in [*base.advisories, *extra.advisories]:
+        key = (advisory.id, advisory.key)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(advisory)
+    return AdvisoryIndex(advisories=merged, generated_at=extra.generated_at or base.generated_at)
+
+
 def summarize(items: list[dict[str, Any]]) -> dict[str, int]:
     """取り込みの内訳。
 
@@ -281,40 +299,78 @@ def save(index: AdvisoryIndex, path: Path) -> None:
     path.write_text(json.dumps(index.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+#: NVD は pubStartDate / pubEndDate の範囲を 120 日までに制限している。
+#: 長い期間を取るときは 120 日ずつに分けて取得し、索引に積み上げる。
+MAX_WINDOW_DAYS = 120
+#: 全期間を取るときの開始点（WordPress のプラグインが CVE を取り始めた頃より前）。
+FULL_START = datetime(2005, 1, 1, tzinfo=UTC)
+
+
+def _params(
+    keyword: str, start: datetime | None = None, end: datetime | None = None
+) -> dict[str, Any]:
+    """NVD のクエリを作る。``start`` / ``end`` が無ければ期間を絞らない。"""
+    params: dict[str, Any] = {"keywordSearch": keyword}
+    if start is not None and end is not None:
+        params["pubStartDate"] = start.strftime("%Y-%m-%dT%H:%M:%S.000")
+        params["pubEndDate"] = end.strftime("%Y-%m-%dT%H:%M:%S.000")
+    return params
+
+
+def _windows(days: int | None, end: datetime) -> list[tuple[datetime, datetime]]:
+    """取得する期間を 120 日以内の窓に分ける。``days=None`` は全期間。"""
+    start = end - timedelta(days=days) if days is not None else FULL_START
+    windows: list[tuple[datetime, datetime]] = []
+    cursor = start
+    while cursor < end:
+        next_cursor = min(cursor + timedelta(days=MAX_WINDOW_DAYS), end)
+        windows.append((cursor, next_cursor))
+        cursor = next_cursor
+    return windows
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows のコンソール文字化け対策
 
     parser = argparse.ArgumentParser(description="NVD から勧告索引を作る")
     parser.add_argument("--keyword", default=DEFAULT_KEYWORD)
-    parser.add_argument("--days", type=int, default=30, help="公開日が何日前までか")
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="公開日が何日前までか。省略すると全期間（NVD は深いページングが遅いので、"
+        "大きな索引は --merge で期間を分けて積み上げる）",
+    )
+    parser.add_argument(
+        "--merge", action="store_true", help="既存の索引に足し込む（重複は CVE と名前で除く）"
+    )
     parser.add_argument("--limit", type=int, default=400, help="取得する CVE の上限（0=無制限）")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args(argv)
 
     end = datetime.now(UTC)
-    start = end - timedelta(days=args.days)
-    params = {
-        "keywordSearch": args.keyword,
-        "pubStartDate": start.strftime("%Y-%m-%dT%H:%M:%S.000"),
-        "pubEndDate": end.strftime("%Y-%m-%dT%H:%M:%S.000"),
-    }
+    windows = _windows(args.days, end)
 
     client = NvdClient()
+    label = "全期間" if args.days is None else f"直近 {args.days} 日"
     print(
-        f"NVD から取得: keyword={args.keyword!r} / {args.days} 日分 / "
+        f"NVD から取得: keyword={args.keyword!r} / {label}（{len(windows)} 分割） / "
         f"キー={'あり' if client.authenticated else 'なし'}（間隔 {client.interval} 秒）"
     )
 
     items: list[dict[str, Any]] = []
     try:
-        for item in client.iter_cves(page_size=200, **params):
-            items.append(item)
+        for start, window_end in windows:
+            params = _params(args.keyword, start, window_end)
+            for item in client.iter_cves(page_size=2000, **params):
+                items.append(item)
+                if args.limit and len(items) >= args.limit:
+                    break
+            print(f"  {start:%Y-%m-%d} 〜 {window_end:%Y-%m-%d}: 累計 {len(items)} 件")
             if args.limit and len(items) >= args.limit:
                 break
-            if len(items) % 200 == 0:
-                print(f"  ... {len(items)} 件取得")
-    except RuntimeError as exc:
+    except (RuntimeError, httpx.HTTPError) as exc:
         print(f"取得に失敗しました: {exc}")
         return 1
     finally:
@@ -322,6 +378,18 @@ def main(argv: list[str] | None = None) -> int:
 
     stats = summarize(items)
     index = build_index(items)
+    if args.merge and args.out.exists():
+        try:
+            base = AdvisoryIndex.load(args.out)
+        except ValueError as exc:
+            print(str(exc))
+            return 1
+        before = len(index.advisories)
+        index = merge_index(base, index)
+        print(
+            f"既存の索引に足しました: {len(base.advisories)} + {before}"
+            f" → {len(index.advisories)} 件"
+        )
     save(index, args.out)
 
     print(
