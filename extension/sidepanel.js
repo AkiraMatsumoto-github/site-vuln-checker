@@ -6,13 +6,6 @@ import { originPattern } from "./patterns.js";
 
 const $ = (id) => document.getElementById(id);
 
-const LEVEL_LABEL = {
-  red: "🔴 赤",
-  yellow: "🟡 黄",
-  gray: "⚪ 灰",
-  none: "—",
-};
-
 const KIND_LABEL = {
   platform: "基盤",
   core: "コア",
@@ -43,49 +36,73 @@ function advisoryLine(advisory) {
   return item;
 }
 
-function renderJudgements(report) {
-  const container = $("judgements");
-  container.replaceChildren();
-  const judgements = report.judgements ?? [];
+/** 1 件分のカード（信号の枠の中に入れる。色は枠が持つのでバッジは付けない）。 */
+function judgementItem(judgement, level) {
+  const item = element("div", "item");
 
-  if (!judgements.length) {
-    const message = report.indexSize
-      ? "該当する勧告はありません（検出できた範囲）"
-      : "索引を取得できていないため、脆弱性の判定はしていません（「調べる」を押すと自動で取得します）";
-    container.append(element("p", "empty", message));
-    return;
+  const head = element("div", "item-head");
+  head.append(
+    element("span", "name", judgement.component),
+    element("span", "version", judgement.version ? `v${judgement.version}` : "版不明"),
+  );
+  item.append(head);
+  item.append(element("p", "action", judgement.action));
+  if (judgement.note) item.append(element("p", "empty", judgement.note));
+
+  const advisories = judgement.advisories ?? [];
+  if (advisories.length) {
+    const list = element("ul", "advisories");
+    list.append(...advisories.map(advisoryLine));
+
+    if (level === "none") {
+      // 該当なしのときは、過去の勧告を**畳んで**出す（同じ CVE の山で誤解させない）
+      const details = document.createElement("details");
+      const summary = element("summary", "", `過去の勧告 ${advisories.length} 件を見る`);
+      details.append(summary, list);
+      item.append(details);
+    } else {
+      item.append(list);
+    }
+  }
+  return item;
+}
+
+//: 信号の並び（赤 → 黄 → 緑 → 灰）。空の枠も出して「全体像」が見えるようにする。
+const LEVEL_SECTIONS = ["red", "yellow", "none", "gray"];
+
+function renderJudgements(report) {
+  const judgements = report.judgements ?? [];
+  const groups = { red: [], yellow: [], none: [], gray: [] };
+  for (const judgement of judgements) {
+    const level = groups[judgement.level] ? judgement.level : "none";
+    groups[level].push(judgement);
   }
 
-  for (const judgement of judgements) {
-    const level = LEVEL_LABEL[judgement.level] ? judgement.level : "none";
-    const item = element("div", `item ${level}`);
+  for (const level of LEVEL_SECTIONS) {
+    const container = $(`items-${level}`);
+    const light = document.querySelector(`.light[data-level="${level}"]`);
+    const count = groups[level].length;
+    container.replaceChildren();
+    light?.classList.toggle("off", count === 0);
+    const counter = light?.querySelector("[data-count]");
+    if (counter) counter.textContent = count ? String(count) : "";
 
-    const head = element("div", "item-head");
-    head.append(
-      element("span", `badge ${level}`, LEVEL_LABEL[level]),
-      element("span", "name", judgement.component),
-      element("span", "version", judgement.version ? `v${judgement.version}` : "版不明"),
-    );
-    item.append(head);
-    item.append(element("p", "action", judgement.action));
-    if (judgement.note) item.append(element("p", "empty", judgement.note));
-
-    const advisories = judgement.advisories ?? [];
-    if (advisories.length) {
-      const list = element("ul", "advisories");
-      list.append(...advisories.map(advisoryLine));
-
-      if (level === "none") {
-        // 該当なしのときは、過去の勧告を**畳んで**出す（同じ CVE の山で誤解させない）
-        const details = document.createElement("details");
-        const summary = element("summary", "", `過去の勧告 ${advisories.length} 件を見る`);
-        details.append(summary, list);
-        item.append(details);
-      } else {
-        item.append(list);
-      }
+    if (!count) {
+      container.append(element("p", "empty", "なし"));
+      continue;
     }
-    container.append(item);
+    container.append(...groups[level].map((judgement) => judgementItem(judgement, level)));
+  }
+
+  const empty = $("levelsEmpty");
+  if (!judgements.length) {
+    empty.hidden = false;
+    empty.textContent = report.indexSize
+      ? "該当する勧告はありません（検出できた範囲）"
+      : "索引を取得できていないため、脆弱性の判定はしていません（「調べる」を押すと自動で取得します）";
+  } else {
+    empty.hidden = true;
+    empty.textContent = "";
   }
 }
 

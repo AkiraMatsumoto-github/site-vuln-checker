@@ -85,23 +85,113 @@ button:disabled {
 .item {
   background: var(--card);
   border: 1px solid var(--line);
-  border-left-width: 4px;
   border-radius: 8px;
   padding: 8px 10px;
   margin-bottom: 8px;
 }
 
-.item.red {
+/* --- 信号（赤・黄・緑・灰）の枠 --------------------------------------------- */
+
+.levels {
+  display: grid;
+  gap: 8px;
+}
+
+.light {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  overflow: hidden;
+}
+
+.light-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-left: 6px solid var(--gray);
+  background: #f7f7f7;
+}
+
+.light .lamp {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--gray);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.light-label {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.light-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.light-count {
+  margin-left: auto;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.light-items {
+  padding: 8px 10px 2px;
+}
+
+.light-items .item:last-child {
+  margin-bottom: 6px;
+}
+
+.light-items > .empty {
+  margin: 0 0 8px;
+}
+
+/* 赤 */
+.light.red .light-head {
   border-left-color: var(--red);
+  background: #fff5f5;
 }
-.item.yellow {
+.light.red .lamp {
+  background: var(--red);
+}
+
+/* 黄 */
+.light.yellow .light-head {
   border-left-color: var(--yellow);
+  background: #fffbea;
 }
-.item.gray {
-  border-left-color: var(--gray);
+.light.yellow .lamp {
+  background: var(--yellow);
 }
-.item.none {
+
+/* 緑（該当なし） */
+.light.green .light-head {
   border-left-color: var(--green);
+  background: #f2fbf6;
+}
+.light.green .lamp {
+  background: var(--green);
+}
+
+/* 灰（判定できない） */
+.light.gray .light-head {
+  border-left-color: var(--gray);
+  background: #f7f7f7;
+}
+.light.gray .lamp {
+  background: var(--gray);
+}
+
+/* 0 件の枠はランプを消灯する（信号機の「消えている」表現） */
+.light.off .lamp {
+  opacity: 0.18;
+}
+.light.off .light-head {
+  background: transparent;
 }
 
 .item-head {
@@ -109,24 +199,6 @@ button:disabled {
   align-items: baseline;
   gap: 6px;
   flex-wrap: wrap;
-}
-
-.badge {
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.badge.red {
-  color: var(--red);
-}
-.badge.yellow {
-  color: var(--yellow);
-}
-.badge.gray {
-  color: var(--gray);
-}
-.badge.none {
-  color: var(--green);
 }
 
 .name {
