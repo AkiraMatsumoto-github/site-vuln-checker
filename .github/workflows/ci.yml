@@ -29,3 +29,18 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+  extension:
+    name: extension (node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 構文チェック
+        run: |
+          for file in extension/*.js; do
+            node --check "$file"
+          done
+
+      - name: 単体テスト（Python 版と同じフィクスチャ）
+        run: node --test extension/tests/
