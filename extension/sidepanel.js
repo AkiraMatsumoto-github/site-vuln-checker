@@ -134,6 +134,14 @@ function renderJudgements(report) {
   }
 }
 
+/** 検出の確かさ（数値は判断に使えないので 高/中/低 で出す）。 */
+function confidenceLabel(confidence) {
+  const value = Number(confidence ?? 0);
+  if (value >= 0.8) return "高";
+  if (value >= 0.5) return "中";
+  return "低";
+}
+
 function renderComponents(report) {
   const container = $("components");
   container.replaceChildren();
@@ -146,22 +154,31 @@ function renderComponents(report) {
   const table = element("table");
   const head = element("thead");
   const headRow = element("tr");
-  for (const label of ["種別", "名前", "版", "確度"]) headRow.append(element("th", "", label));
+  for (const label of ["種別", "名前", "Version", "検出"]) headRow.append(element("th", "", label));
   head.append(headRow);
 
   const body = element("tbody");
   for (const finding of findings) {
     const row = element("tr");
+    const detected = element("td", "", confidenceLabel(finding.confidence));
+    detected.title = `検出の確かさ ${Number(finding.confidence ?? 0).toFixed(2)}`;
     row.append(
       element("td", "", KIND_LABEL[finding.kind] ?? finding.kind),
       element("td", "", finding.name),
       element("td", "", finding.version ?? "—"),
-      element("td", "", Number(finding.confidence ?? 0).toFixed(2)),
+      detected,
     );
     body.append(row);
   }
   table.append(head, body);
-  container.append(table);
+  container.append(
+    table,
+    element(
+      "p",
+      "empty",
+      "Version が「—」のものは、製品は判定できたが Version が取れなかったものです。「検出」はその製品だと判定できた確かさ（高 / 中 / 低）です。",
+    ),
+  );
 }
 
 function renderNotes(report) {

@@ -62,7 +62,7 @@ jobs:
             uv run svc-ingest --days 14 --merge --out "$INDEX_PATH"
           else
             uv run svc-ingest --out "$INDEX_PATH"
-            uv run svc-ingest --source cpe --products php,wordpress,laravel,symfony,cakephp,django,rails \
+            uv run svc-ingest --source cpe --products php,wordpress,laravel,symfony,cakephp,django,rails,jekyll \
               --merge --out "$INDEX_PATH"
           fi
 

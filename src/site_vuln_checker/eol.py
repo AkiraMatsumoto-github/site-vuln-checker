@@ -40,6 +40,7 @@ PRODUCTS: dict[str, str] = {
     "cakephp": "CakePHP",
     "django": "Django",
     "rails": "Ruby on Rails",
+    "jekyll": "Jekyll",
     "jquery": "jQuery",
 }
 

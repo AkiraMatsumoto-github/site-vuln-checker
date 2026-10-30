@@ -10,7 +10,7 @@
 //
 // 方針（企画書 12.5）: 秘密（API キー）は持たない。通信は索引の取得だけ。
 
-import { AdvisoryIndex, judge, summarizeLevels } from "./advisor.js";
+import { AdvisoryIndex, judge, normalizeSlug, summarizeLevels } from "./advisor.js";
 import { INDEX_CANDIDATES, INDEX_ORIGINS, isIndexStale } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
 import { originPattern } from "./patterns.js";
@@ -199,6 +199,14 @@ async function inspectActiveTab() {
   const indexRefresh = await ensureFreshIndex();
   const index = await loadIndex();
   const judgements = judge(analysis, index);
+
+  // 索引にデータが無いプラットフォームは「構成のみ」であることを伝える
+  for (const component of analysis.findings) {
+    if (component.kind !== "platform" || !component.version) continue;
+    const key = normalizeSlug(component.name);
+    if (judgements.some((item) => normalizeSlug(item.component) === key)) continue;
+    analysis.notes.push(`${component.name} の弱点・サポート情報は未収録です（構成のみ表示）`);
+  }
 
   const report = {
     url: analysis.url,

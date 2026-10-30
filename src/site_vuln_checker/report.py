@@ -66,13 +66,12 @@ def _esc(value: object) -> str:
 
 
 def _confidence(conf: float) -> str:
-    """確度を色付きのバーで表す（数値も併記する）。"""
-    width = max(2, min(100, round(conf * 100)))
-    tone = "hi" if conf >= 0.85 else "mid" if conf >= 0.6 else "lo"
-    return (
-        f'<span class="bar"><i class="{tone}" style="width:{width}%"></i></span> '
-        f'<code>{conf:.2f}</code>'
-    )
+    """**検出の確かさ**を 高 / 中 / 低 で表す（Version の正しさではない）。
+
+    数値そのものは利用者の判断に使えないため、ツールチップに残す。
+    """
+    label = "高" if conf >= 0.8 else "中" if conf >= 0.5 else "低"
+    return f'<span title="検出の確かさ {conf:.2f}">{label}</span>'
 
 
 def _rows(findings: list[dict]) -> str:
@@ -110,8 +109,12 @@ def _section(title: str, findings: list[dict]) -> str:
         return ""
     return (
         f"<h3>{_esc(title)}</h3>"
-        "<table><thead><tr><th>名前</th><th>推定バージョン</th><th>確度</th>"
+        "<table><thead><tr><th>名前</th><th>Version</th><th>検出</th>"
         f"<th>根拠</th></tr></thead><tbody>{_rows(findings)}</tbody></table>"
+        '<p class="note">'
+        "Version が「—」のものは、製品は判定できたが Version が取れなかったものです。"
+        "「検出」は<b>その製品だと判定できた確かさ</b>（高 / 中 / 低）です。"
+        "</p>"
     )
 
 

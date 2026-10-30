@@ -328,6 +328,49 @@ def _detect_frameworks(html_lower: str) -> list[Finding]:
     return findings
 
 
+#: ``<meta name="generator">`` から読む既知のプラットフォーム（WordPress 以外）。
+#: 静的サイト生成ツールは generator に製品名と Version を出すことが多い。
+_GENERATOR_PLATFORMS: tuple[tuple[str, str], ...] = (
+    ("jekyll", "jekyll"),
+    ("hugo", "hugo"),
+    ("ghost", "ghost"),
+    ("drupal", "drupal"),
+    ("joomla", "joomla"),
+    ("gatsby", "gatsby"),
+    ("next.js", "nextjs"),
+    ("nextjs", "nextjs"),
+    ("nuxt", "nuxt"),
+    ("astro", "astro"),
+    ("eleventy", "eleventy"),
+    ("hexo", "hexo"),
+    ("middleman", "middleman"),
+)
+
+#: ``Jekyll v4.4.1`` / ``Hugo 0.120.4`` のような表記を分解する
+_GENERATOR_RE = re.compile(r"^(?P<name>[A-Za-z][A-Za-z0-9 ._\-]*?)\s+v?(?P<version>\d+(?:\.\d+)*)")
+
+
+def _detect_generator_platform(generator: str) -> Finding | None:
+    """``generator`` から WordPress 以外のプラットフォームを読む（Jekyll など）。
+
+    静的サイト生成ツールは**ビルド時に Version を埋め込む**ため、外部から
+    そのまま読める。WordPress は ``_detect_core`` が扱うのでここでは除外する。
+    """
+    text = (generator or "").strip()
+    if not text or "wordpress" in text.lower():
+        return None
+
+    match = _GENERATOR_RE.match(text)
+    name = (match.group("name") if match else text).strip().lower()
+    version = match.group("version") if match else None
+    for needle, slug in _GENERATOR_PLATFORMS:
+        if needle in name:
+            return Finding(
+                "platform", slug, version, 0.95 if version else 0.8, ("meta:generator",)
+            )
+    return None
+
+
 def _detect_server(headers: dict[str, str]) -> list[Finding]:
     """``X-Powered-By`` / ``Server`` から PHP と Web サーバを推定する。"""
     findings: list[Finding] = []
@@ -366,6 +409,10 @@ def analyze(url: str, html: str, headers: dict[str, str] | None = None) -> Analy
     analysis = Analysis(url=url)
     analysis.findings.extend(_detect_platforms(html_lower, resources, meta, generator))
 
+    generator_platform = _detect_generator_platform(generator)
+    if generator_platform:
+        analysis.findings.append(generator_platform)
+
     core = _detect_core(generator, resources)
     if core:
         analysis.findings.append(core)
@@ -383,6 +430,15 @@ def analyze(url: str, html: str, headers: dict[str, str] | None = None) -> Analy
         analysis.notes.append(
             f"バージョンが分からないプラグイン: {', '.join(unknown)}（灰判定になります）"
         )
-    if not analysis.of_kind("language"):
+
+    # PHP の話は PHP 製のサイトだけにする（静的サイトに「PHP 不明」は無意味）
+    php_based = {"wordpress", "laravel", "symfony", "codeigniter", "cakephp"}
+    platforms = {p.name for p in analysis.platforms}
+    if not analysis.of_kind("language") and (not platforms or platforms & php_based):
         analysis.notes.append("PHP のバージョンは取得できませんでした（ヘッダ非公開）")
+    elif platforms and not (platforms & php_based):
+        others = "/".join(sorted(platforms))
+        analysis.notes.append(
+            f"このサイトは {others} 製です（プラグインや PHP の判定はありません）"
+        )
     return analysis

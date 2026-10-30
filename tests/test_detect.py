@@ -88,6 +88,32 @@ def test_php_and_server_from_headers() -> None:
 def test_without_headers_php_is_unknown() -> None:
     analysis = analyze("https://example.com/", _load("wp_home.html"), {})
     assert analysis.of_kind("language") == []
+
+
+def test_generator_platform_reads_jekyll() -> None:
+    """静的サイト生成ツールは generator に Version を埋め込む（実在サイトの例）。"""
+    html = (
+        '<html><head><meta name="generator" content="Jekyll v4.4.1" />'
+        '<script src="/assets/js/site.js"></script></head><body></body></html>'
+    )
+    analysis = analyze("https://example.com/", html, {"server": "cloudflare"})
+    platform = _get(analysis, "platform", "jekyll")
+    assert platform.version == "4.4.1"
+    assert platform.confidence >= 0.9
+    # 静的サイトなので「PHP のバージョンが不明」とは言わない
+    assert not any("PHP のバージョン" in note for note in analysis.notes)
+    assert any("jekyll" in note for note in analysis.notes)
+
+
+def test_wordpress_generator_is_not_treated_as_generator_platform() -> None:
+    """WordPress は core として扱う（platform の二重計上をしない）。"""
+    html = (
+        '<html><head><meta name="generator" content="WordPress 6.8.2" /></head><body></body></html>'
+    )
+    analysis = analyze("https://example.com/", html, {})
+    assert _get(analysis, "core", "wordpress").version == "6.8.2"
+    assert not [f for f in analysis.findings if f.kind == "platform" and f.name == "jekyll"]
+
     assert any("PHP のバージョンは取得できませんでした" in n for n in analysis.notes)
 
 

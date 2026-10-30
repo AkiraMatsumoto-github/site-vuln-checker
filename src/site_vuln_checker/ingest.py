@@ -42,6 +42,7 @@ CPE_PRODUCTS: dict[str, tuple[str, ...]] = {
     "cakephp": ("cpe:2.3:a:cakephp:cakephp",),
     "django": ("cpe:2.3:a:djangoproject:django",),
     "rails": ("cpe:2.3:a:rubyonrails:rails",),
+    "jekyll": ("cpe:2.3:a:jekyllrb:jekyll",),
 }
 
 #: ``(vendor, product)`` → 製品キー（CPE の照合用）

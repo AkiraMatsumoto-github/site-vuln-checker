@@ -295,7 +295,7 @@ def test_same_cve_across_branches_is_shown_once() -> None:
     judgements = judge(analysis, index)
     assert len(judgements) == 1
     assert judgements[0].level == LEVEL_NONE
-    assert "勧告はありません" in judgements[0].action
+    assert "報告はありません" in judgements[0].action
     assert "すべて修正済み" in judgements[0].note
     assert len(judgements[0].advisories) == 1, "同じ CVE は 1 行にまとめる"
 

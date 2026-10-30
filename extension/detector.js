@@ -35,6 +35,45 @@ const FRAMEWORK_SIGNALS = [
   ["nuxt", ["__nuxt__"], 0.6],
 ];
 
+/** `<meta name="generator">` から読む既知のプラットフォーム（WordPress 以外）。 */
+const GENERATOR_PLATFORMS = [
+  ["jekyll", "jekyll"],
+  ["hugo", "hugo"],
+  ["ghost", "ghost"],
+  ["drupal", "drupal"],
+  ["joomla", "joomla"],
+  ["gatsby", "gatsby"],
+  ["next.js", "nextjs"],
+  ["nextjs", "nextjs"],
+  ["nuxt", "nuxt"],
+  ["astro", "astro"],
+  ["eleventy", "eleventy"],
+  ["hexo", "hexo"],
+  ["middleman", "middleman"],
+];
+
+const GENERATOR_RE = /^([A-Za-z][A-Za-z0-9 ._-]*?)\s*v?(\d+(?:\.\d+)*)/;
+
+/**
+ * generator から WordPress 以外のプラットフォームを読む（Jekyll など）。
+ *
+ * 静的サイト生成ツールはビルド時に Version を埋め込むため、そのまま読める。
+ */
+export function detectGeneratorPlatform(generator) {
+  const text = String(generator ?? "").trim();
+  if (!text || text.toLowerCase().includes("wordpress")) return null;
+
+  const match = GENERATOR_RE.exec(text);
+  const name = (match ? match[1] : text).trim().toLowerCase();
+  const version = match ? match[2] : null;
+  for (const [needle, slug] of GENERATOR_PLATFORMS) {
+    if (name.includes(needle)) {
+      return finding("platform", slug, version, version ? 0.95 : 0.8, ["meta:generator"]);
+    }
+  }
+  return null;
+}
+
 export function detectFrameworks(htmlLower) {
   const findings = [];
   for (const [name, needles, confidence] of FRAMEWORK_SIGNALS) {
@@ -214,9 +253,17 @@ export function buildNotes(findings) {
   if (unknown.length) {
     notes.push(`バージョンが分からないプラグイン: ${unknown.join(", ")}（灰判定になります）`);
   }
-  if (!findings.some((item) => item.kind === "language")) {
+
+  // PHP の話は PHP 製のサイトだけにする（静的サイトに「PHP 不明」は無意味）
+  const phpBased = ["wordpress", "laravel", "symfony", "codeigniter", "cakephp"];
+  const platforms = findings.filter((item) => item.kind === "platform").map((item) => item.name);
+  const isPhpBased = platforms.some((name) => phpBased.includes(name));
+  if (!findings.some((item) => item.kind === "language") && (!platforms.length || isPhpBased)) {
     notes.push("PHP のバージョンは取得できませんでした（分かる場合は入力してください）");
+  } else if (platforms.length && !isPhpBased) {
+    notes.push(`このサイトは ${platforms.join("/")} 製です（プラグインや PHP の判定はありません）`);
   }
+
   const frameworks = findings
     .filter((item) => item.kind === "framework" && !item.version)
     .map((item) => item.name);
@@ -234,6 +281,7 @@ export function analyze(evidence) {
 
   const findings = [
     ...detectPlatforms(htmlLower, resources),
+    detectGeneratorPlatform(generator),
     detectCore(generator, resources),
     ...detectPlugins(resources, html),
     ...detectThemes(resources, html),

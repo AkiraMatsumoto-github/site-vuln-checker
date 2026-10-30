@@ -117,7 +117,7 @@ test("修正版以降なら該当なし（重複 CVE は 1 件にまとめる）
   const judgements = judge(analysis([component]), index);
   assert.equal(judgements.length, 1);
   assert.equal(judgements[0].level, LEVEL.NONE);
-  assert.match(judgements[0].action, /勧告はありません/);
+  assert.match(judgements[0].action, /報告はありません/);
   assert.match(judgements[0].note, /すべて修正済み/);
   assert.equal(judgements[0].advisories.length, 1, "同じ CVE を 1 行にまとめる");
 });

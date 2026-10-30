@@ -51,7 +51,7 @@
 
 | | 内容 |
 | --- | --- |
-| ✅ 分かる | WordPress で作られているか／**本体のバージョン**／追加機能（プラグイン）の名前とバージョン／テーマ／JavaScript ライブラリ／**該当する弱点と、直したバージョン**／**サポート終了（EOL）** |
+| ✅ 分かる | サイトの作り（WordPress／Jekyll などの静的サイト）と**バージョン**／追加機能（プラグイン）の名前とバージョン／テーマ／JavaScript ライブラリ／**該当する弱点と、影響する Version**／**サポート終了（EOL）** |
 | ✅ サイトが公開していれば分かる | **PHP のバージョン**（`X-Powered-By` を出しているサイト。実測 **10 サイト中 1 サイト**）。**初回のチェック時に許可を求めます**（拒否しても判定は続きます） |
 | ✅ 入力すれば分かる | 公開していないサイトの **PHP・フレームワークのバージョン**。分かる場合だけ画面から入れてください |
 | △ 半分だけ | 追加機能は**画面に読み込まれているもの**だけ。バージョンが取れないものは「灰」になります |
@@ -177,7 +177,7 @@ PHP 8.1.27 のサイトを調べ、バージョンに `8.1.27` を入力した�
 
 🟢 緑（該当なし）
    wordpress  Version 6.2.6
-   この Version に脆弱性の勧告はありません
+   この Version に脆弱性の報告はありません
    過去の勧告 1 件は、すべて修正済みです
    ▸ 過去の勧告（1件）を見る
 
@@ -229,7 +229,7 @@ uv sync
 # 索引を作る（既定は直近 1 年。NVD の都合で 120 日ずつ 4 回に分けて取得します）
 uv run svc-ingest --out out/advisories.json
 # PHP 本体・フレームワークの弱点を足す（NVD の CPE から。範囲がそのまま取れます）
-uv run svc-ingest --source cpe --products php,wordpress,laravel,symfony,cakephp,django,rails `
+uv run svc-ingest --source cpe --products php,wordpress,laravel,symfony,cakephp,django,rails,jekyll `
   --merge --out out/advisories.json
 # 悪用実績（KEV）と悪用確率（EPSS）を足す
 uv run svc-enrich --index out/advisories.json
@@ -368,11 +368,18 @@ setx NVD_API_KEY "取得したキー"     # 以後ずっと（新しいターミ
 
 ```powershell
 uv sync
-uv run pytest -q            # Python 95 tests
+uv run pytest -q            # Python 118 tests
 uv run ruff check .
 
 node --check extension/background.js
-node --test extension/tests/detector.test.mjs extension/tests/advisor.test.mjs   # JavaScript 20 tests
+node --test extension/tests/detector.test.mjs extension/tests/advisor.test.mjs extension/tests/patterns.test.mjs
+```
+
+アイコン（`extension/icons/icon{16,32,48,128}.png`）は生成スクリプトで作っています。
+デザインを変えたいときは数値を直して再生成してください（外部ライブラリ不要）。
+
+```powershell
+uv run python tools/make_icons.py
 ```
 
 CI（GitHub Actions）は **Python と Node の両方**を回します。
