@@ -235,10 +235,26 @@ async function inspect({ askPermission = false } = {}) {
   $("status").textContent = "調べています…";
   try {
     if (askPermission) {
-      await ensureIndexPermission();
+      // サイトの許可（ページの読み取り＋ヘッダ）を先に取る。取れなくても続行する。
       await askHeaderPermission();
+      await ensureIndexPermission();
     }
-    const report = await chrome.runtime.sendMessage({ type: "inspect" });
+
+    let report = await chrome.runtime.sendMessage({ type: "inspect" });
+
+    // このタブを読む許可が無い（アイコンを押さずにパネルを開いた等）→ 許可を取って再試行
+    if (report?.needsSitePermission && report.origin) {
+      const pattern = originPattern(report.origin);
+      const granted = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
+      if (granted) {
+        report = await chrome.runtime.sendMessage({ type: "inspect" });
+      } else {
+        $("status").textContent =
+          "このサイトへのアクセスが許可されませんでした。ツールバーのアイコンをクリックしてから、もう一度お試しください。";
+        return;
+      }
+    }
+
     if (report?.error) {
       $("status").textContent = report.error;
       return;

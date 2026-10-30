@@ -80,6 +80,8 @@ CI（GitHub Actions）でも同じコマンドを実行しています。
 ## Chrome Web Store に出すときの注意（企画書 20 章）
 
 - **単一目的**: 「閲覧中サイトの技術構成と既知脆弱性の表示」に限定する（一覧ダッシュボードは拡張に入れない）
-- **最小権限**: `activeTab` / `scripting` / `storage` / `sidePanel` / `alarms` のみ。`<all_urls>` と `webRequest` は要求しない
+- **最小権限**: `activeTab` / `tabs` / `scripting` / `storage` / `sidePanel` / `alarms` のみ。`<all_urls>` と `webRequest` は要求しない
+  - `tabs` は「いま開いているサイトの URL を知る」ために必要（履歴は読みません）
+  - サイトの読み取りは、アイコンを押したとき（`activeTab`）または**サイトごとの許可**で行う
 - **プライバシー**: 閲覧 URL を送らない・テレメトリなしを説明文とポリシーに明記
 - 名前・説明文に **「WordPress」を入れない**（商標ポリシー。説明文での言及に留める）

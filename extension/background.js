@@ -124,15 +124,29 @@ async function readHeaders(url) {
 
 async function inspectActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !/^https?:/i.test(tab.url ?? "")) {
-    throw new Error("http / https のページで実行してください");
+  if (!tab?.id) throw new Error("タブが見つかりません");
+
+  const url = tab.url ?? tab.pendingUrl ?? "";
+  if (!/^https?:/i.test(url)) {
+    throw new Error("http / https のページを開いてから実行してください");
   }
 
-  const [{ result } = {}] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: collectEvidence,
-  });
-  if (!result) throw new Error("ページから情報を取得できませんでした");
+  // このタブを読む許可があるかを「やってみる」で確かめる。
+  // activeTab（アイコンを押したとき）でも、サイトごとの許可でも通る。
+  let result;
+  try {
+    const injected = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: collectEvidence,
+    });
+    result = injected?.[0]?.result;
+  } catch {
+    result = null;
+  }
+  if (!result) {
+    // サイドパネル側で許可を取ってから、もう一度呼んでもらう
+    return { needsSitePermission: true, origin: originOf(url) };
+  }
 
   const headers = await readHeaders(result.url);
   const analysis = analyze({
@@ -167,6 +181,15 @@ async function inspectActiveTab() {
   await chrome.storage.session.set({ [REPORT_KEY]: report });
   await updateBadge(report);
   return report;
+}
+
+/** URL からオリジン（``https://example.com``）を取り出す。 */
+function originOf(url) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
 }
 
 /**
