@@ -110,6 +110,7 @@ def test_plausible_names_are_accepted(name: str) -> None:
     "name",
     [
         "`value` parameter of the `update-photo` action in the",  # 実データで出た断片
+        "'action (also function",  # 実データで出た断片（記号始まり）
         "customer role is freely self-registerable without admin approval, expl",  # 断片
         "plugin not properly verifying that a user is authorized to perform an",  # 断片
         "site. If a POP chain is present via an additional",  # 断片

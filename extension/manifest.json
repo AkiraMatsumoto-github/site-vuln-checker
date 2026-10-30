@@ -5,7 +5,11 @@
   "version": "0.1.0",
   "description": "開いているサイトの技術構成を推定し、既知の脆弱性とサポート終了を「更新すべきもの」として表示します。",
   "permissions": ["sidePanel", "activeTab", "scripting", "storage", "alarms"],
-  "optional_host_permissions": ["https://*/*"],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
   "background": { "service_worker": "background.js", "type": "module" },
   "side_panel": { "default_path": "sidepanel.html" },
   "action": { "default_title": "サイト脆弱性チェッカー — このサイトを調べる" },

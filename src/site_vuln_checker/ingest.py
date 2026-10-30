@@ -87,12 +87,14 @@ MAX_NAME_WORDS = 14
 def is_plausible_name(name: str) -> bool:
     """CVE 本文から切り出した名前が「製品名らしい」か。
 
-    実データでは ``the `value` parameter of the `update-photo` action in the plugin`` のように
-    文中の別の "the ... plugin" を拾ってしまうことがある。長さや大文字小文字ではなく
-    **文の断片に特徴的な語**で弾く（長い正規名・小文字始まりの名前を落とさないため）。
+    実データでは ``the `value` parameter of the `update-photo` action in the plugin`` や
+    ``the 'action (also function ... plugin`` のように、文中の別の "the ... plugin" を
+    拾ってしまうことがある。長さや大文字小文字ではなく、**名前の形**で弾く。
     """
     if not name or len(name) > MAX_NAME_LENGTH:
         return False
+    if not name[0].isalnum():
+        return False  # 記号始まり（'action など）は文の断片
     if name.lower() in _STOP_NAMES:
         return False
     if any(char in name for char in _BAD_NAME_CHARS):

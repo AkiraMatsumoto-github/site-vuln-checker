@@ -23,6 +23,8 @@
 | 可視化 | 検出したプラグイン・版・確度・根拠を HTML レポートにする | `site_vuln_checker/report.py` |
 | **判定（軸A）** | 勧告索引（JSON）と突き合わせて **赤 / 黄 / 灰** を決める | `site_vuln_checker/advisories.py` |
 | **索引の生成** | NVD の CVE から「before X」「X 以下」を抽出して索引を作る | `site_vuln_checker/ingest.py` |
+| **悪用実績・予測** | KEV / EPSS を索引に付ける | `site_vuln_checker/enrich.py` |
+| **Chrome 拡張** | サイドパネルで判定を表示（MV3・ビルド不要・Node はテストのみ） | `extension/` |
 
 > **JS は未検証**: この環境には Node が入っていないため、まず判定ロジックを Python で固め、
 > `tests/fixtures/` を**正解データ**として拡張（Manifest V3 / JS）へ移植する。
@@ -165,6 +167,23 @@ uv run svc-enrich --index out/advisories.json --skip-epss
 → PHP の EOL 判定は **Site Health 読み取り（自サイト）が本命**という設計判断を、実測が裏付けた。
 
 `out/report.html` を開くと、サイトごとに「プラグイン名 / 推定バージョン / 確度 / 根拠」が表で見える。
+
+## Chrome 拡張（サイドパネル）
+
+```powershell
+# 1. 索引を作る
+uv run svc-ingest --days 14 --limit 200 --out out/advisories.json
+uv run svc-enrich --index out/advisories.json
+
+# 2. 索引をローカルで配信する（別ターミナル）
+python -m http.server 8000
+
+# 3. chrome://extensions → デベロッパーモード → 「パッケージ化されていない拡張機能を読み込む」
+#    → extension フォルダを選ぶ → 設定で http://localhost:8000/out/advisories.json を読み込む
+```
+
+詳しくは [extension/README.md](extension/README.md)（権限・制約・確認手順）を参照。
+JS のテストは CI で実行しています（`node --check` + `node --test`）。
 
 ## 安全な使い方（重要）
 
