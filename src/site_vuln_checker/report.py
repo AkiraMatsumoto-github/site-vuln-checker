@@ -123,6 +123,17 @@ _LEVEL_LABELS = {
 }
 
 
+def _advisory_line(advisory: dict) -> str:
+    """`CVE-xxxx ・ CVSS 9.8 ・ KEV ・ EPSS 42%` のような 1 行。"""
+    cvss = advisory.get("cvss")
+    parts = [f"CVSS {_esc(cvss if cvss is not None else '—')}"]
+    if advisory.get("kev"):
+        parts.append("<b>KEV</b>")
+    if advisory.get("epss") is not None:
+        parts.append(f"EPSS {float(advisory['epss']) * 100:.0f}%")
+    return f"<code>{_esc(advisory.get('id'))}</code> " + " ・ ".join(parts)
+
+
 def _judgement_rows(judgements: list[dict]) -> str:
     """赤/黄/灰の判定を表にする。"""
     rows = []
@@ -130,11 +141,7 @@ def _judgement_rows(judgements: list[dict]) -> str:
         label, color = _LEVEL_LABELS.get(str(judgement.get("level")), ("?", "#555"))
         advisories = judgement.get("advisories") or []
         details = (
-            "<br>".join(
-                f"<code>{_esc(a.get('id'))}</code> CVSS {_esc(a.get('cvss') or '—')}"
-                f"{' <b>KEV</b>' if a.get('kev') else ''}"
-                for a in advisories
-            )
+            "<br>".join(_advisory_line(a) for a in advisories)
             or '<span class="empty">該当なし</span>'
         )
         note = judgement.get("note")

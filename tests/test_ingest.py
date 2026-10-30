@@ -1,13 +1,17 @@
 """NVD 本文の解析（ingest）のテスト。
 
-**ネットワークは使わない**。実際の NVD で観測された 3 通りの言い回しを固定する。
+**ネットワークは使わない**。実際の NVD で観測された言い回しを固定する。
 """
+
+import pytest
 
 from site_vuln_checker.ingest import (
     build_index,
     extract_cvss,
     extract_name,
+    extract_names,
     extract_range,
+    is_plausible_name,
     parse_cve,
     parse_cves,
     summarize,
@@ -35,8 +39,8 @@ DESC_OTHER_PRODUCT = (
 DESC_FIXED_IN = "The Foo plugin for WordPress is vulnerable to X. This is fixed in 2.0.0."
 # 1 つの CVE が複数プラグインを列挙する形（レビュー M6）
 DESC_MULTI = (
-    "The A plugin for WordPress, the B plugin for WordPress and the C plugin are vulnerable "
-    "before 3.1."
+    "The Foo plugin for WordPress, the Bar plugin for WordPress and the Baz plugin are "
+    "vulnerable before 3.1."
 )
 
 
@@ -80,15 +84,57 @@ def test_parse_cves_multiple_plugins() -> None:
     """1 つの CVE が複数プラグインを列挙していれば、すべて拾う（レビュー M6）。"""
     advisories, reason = parse_cves(_item(DESC_MULTI, "CVE-2026-0009"))
     assert reason == "ok"
-    assert [a.name for a in advisories] == ["A", "B", "C"]
+    assert [a.name for a in advisories] == ["Foo", "Bar", "Baz"]
     assert {a.affected_below for a in advisories} == {"3.1"}
     assert {a.id for a in advisories} == {"CVE-2026-0009"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "WP Photo Album Plus",
+        "Contact Form by Supsystic",
+        "WPLP Cookie Consent - Cookie Banner & Consent Management",
+        "Elementor",
+        # 長い正規名（, を含む。60 文字超）
+        "Tourfic - AI Powered Travel Booking, Hotel Booking & Car Rental",
+        # 小文字始まりの正規名
+        "wpDiscuz",
+    ],
+)
+def test_plausible_names_are_accepted(name: str) -> None:
+    assert is_plausible_name(name) is True
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "`value` parameter of the `update-photo` action in the",  # 実データで出た断片
+        "customer role is freely self-registerable without admin approval, expl",  # 断片
+        "plugin not properly verifying that a user is authorized to perform an",  # 断片
+        "site. If a POP chain is present via an additional",  # 断片
+        "reported behaviour was determined not to be a vulnerability: the Shop",  # 入れ子 the
+        "plugin that allows",  # 途中で切れている
+        "",  # 空
+    ],
+)
+def test_implausible_names_are_rejected(name: str) -> None:
+    assert is_plausible_name(name) is False
+
+
+def test_extract_names_skips_fragments() -> None:
+    """本文の別の "the ... plugin" を名前として採用しない（実データで発生した不具合）。"""
+    description = (
+        "The WP Photo Album Plus plugin for WordPress is vulnerable to privilege escalation "
+        "via the `value` parameter of the `update-photo` action in the plugin."
+    )
+    assert extract_names(description) == ["WP Photo Album Plus"]
 
 
 def test_build_index_keeps_multiple_plugins_per_cve() -> None:
     items = [_item(DESC_MULTI, "CVE-2026-0009")]
     index = build_index(items)
-    assert [a.name for a in index.advisories] == ["A", "B", "C"]
+    assert [a.name for a in index.advisories] == ["Foo", "Bar", "Baz"]
     assert summarize(items) == {"total": 1, "kept": 1, "skipped": 0, "advisories": 3}
 
 

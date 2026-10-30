@@ -46,6 +46,63 @@ _FIXED_IN_RE = re.compile(rf"\bfix(?:ed)?\s+in\s+(?:version\s+)?(?P<v>{_VERSION}
 
 #: 1 つの CVE が複数プラグインを列挙することがある（上限は誤取り込みよけ）
 MAX_NAMES_PER_CVE = 5
+#: 名前として不自然な文字（本文の断片を拾ってしまうのを防ぐ）。
+#: WordPress プラグイン名には () | ? ! , : ; が普通に含まれるので許可する。
+_BAD_NAME_CHARS = frozenset("`\"[]{}<>")
+#: 名前の末尾に来たら「途中で切れている」とみなす語。
+#: "…for WordPress plugin" のように for/with で終わる正規名があるので含めない。
+_DANGLING_ENDINGS = (" in", " of", " is", " are", " that", " which")
+#: 文の断片に特徴的な語（これを含むものは製品名ではない）
+_SENTENCE_MARKERS = (
+    " is ",
+    " are ",
+    " was ",
+    " were ",
+    " does ",
+    " do not ",
+    " not ",
+    " may ",
+    " can ",
+    " which ",
+    " that ",
+    " allows ",
+    " because ",
+    " without ",
+    " when ",
+    " have ",
+    " has ",
+    " been ",
+    " to be ",
+    " a user ",
+    " the ",
+)
+#: 名前として成立しない語
+_STOP_NAMES = frozenset({"the", "a", "an", "plugin", "plugins", "wordpress"})
+#: 名前の最大長（実データでは 80 文字超の正規名がある）
+MAX_NAME_LENGTH = 100
+#: 名前の最大語数（保険。長い marketing 名があるので緩め）
+MAX_NAME_WORDS = 14
+
+
+def is_plausible_name(name: str) -> bool:
+    """CVE 本文から切り出した名前が「製品名らしい」か。
+
+    実データでは ``the `value` parameter of the `update-photo` action in the plugin`` のように
+    文中の別の "the ... plugin" を拾ってしまうことがある。長さや大文字小文字ではなく
+    **文の断片に特徴的な語**で弾く（長い正規名・小文字始まりの名前を落とさないため）。
+    """
+    if not name or len(name) > MAX_NAME_LENGTH:
+        return False
+    if name.lower() in _STOP_NAMES:
+        return False
+    if any(char in name for char in _BAD_NAME_CHARS):
+        return False
+    lowered = name.lower()
+    if any(marker in f" {lowered} " for marker in _SENTENCE_MARKERS):
+        return False
+    if any(lowered.endswith(word) for word in _DANGLING_ENDINGS):
+        return False
+    return len(name.split()) <= MAX_NAME_WORDS
 
 
 def english_description(cve: dict[str, Any]) -> str:
@@ -57,12 +114,16 @@ def english_description(cve: dict[str, Any]) -> str:
 
 
 def extract_names(description: str) -> list[str]:
-    """「The ◯◯ plugin」を**すべて**取り出す（1 つの CVE が複数プラグインを列挙する形がある）。"""
+    """「The ◯◯ plugin」を**すべて**取り出す（1 つの CVE が複数プラグインを列挙する形がある）。
+
+    文中の別の "the ... plugin" を拾ってしまうことがあるので、:func:`is_plausible_name` で弾く。
+    """
     names: list[str] = []
     for match in _NAME_RE.finditer(description):
         name = re.sub(r"\s+", " ", match.group("name")).strip(" .,-")
-        if name and name not in names:
-            names.append(name)
+        if not is_plausible_name(name) or name in names:
+            continue
+        names.append(name)
         if len(names) >= MAX_NAMES_PER_CVE:
             break
     return names

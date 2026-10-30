@@ -124,7 +124,7 @@ uv run python -c "from site_vuln_checker.nvd import api_key_from_env, min_interv
 
 | 判定 | 条件 |
 | --- | --- |
-| 🔴 赤 | 影響する勧告に **KEV** がある、または **CVSS 9.0 以上** |
+| 🔴 赤 | 影響する勧告に **KEV** / **CVSS 9.0 以上** / **EPSS 0.5 以上** のいずれかがある |
 | 🟡 黄 | 影響する勧告がある（上記以外） |
 | ⚪ 灰 | **バージョンが不明**（勧告の履歴があるものだけ表示） |
 | — | 勧告はあるが修正版以降（該当なし） |
@@ -132,6 +132,21 @@ uv run python -c "from site_vuln_checker.nvd import api_key_from_env, min_interv
 - `affected_below` は NVD の説明文にある「before 5.9.9」をそのまま使う想定です（企画書 4.3）
 - **バージョンが分からないものを緑にはしません**（企画書 7.6 の鉄則）
 - 索引は `tests/fixtures/advisories.json`（**合成データ**）で試せます
+
+### KEV / EPSS を付ける
+
+```powershell
+# 索引に KEV（悪用実績）と EPSS（悪用予測）を後付けする
+uv run svc-enrich --index out/advisories.json
+
+# ネットワークを使わずに片方だけ飛ばすこともできる
+uv run svc-enrich --index out/advisories.json --skip-epss
+```
+
+- **KEV**: CISA のカタログ（約 1,700 件）に載っていれば `kev=true`。載っている勧告は**赤**
+- **EPSS**: FIRST の日次 CSV（約 25 万件 → 実測 39.7 万件）から確率とパーセンタイルを付与。**0.5 以上は赤**
+- 取り込みに失敗しても**索引は壊れません**（付加情報なので、無いまま進む）
+
 
 ## 初回の実測結果（n=4 / 2026-10-29）
 

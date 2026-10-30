@@ -41,8 +41,9 @@ LEVEL_ORDER = {LEVEL_RED: 0, LEVEL_YELLOW: 1, LEVEL_GRAY: 2, LEVEL_NONE: 3}
 _SEGMENT_RE = re.compile(r"\d+|[A-Za-z]+")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
-#: 赤と判定するしきい値（7.5）。KEV か CVSS 9.0 以上。
+#: 赤と判定するしきい値（7.5）。KEV / CVSS 9.0 以上 / EPSS 0.5 以上。
 RED_CVSS = 9.0
+RED_EPSS = 0.5
 
 
 def normalize_slug(text: str) -> str:
@@ -101,7 +102,10 @@ class Advisory:
     fixed: str | None = None
     cvss: float | None = None
     kev: bool = False
+    kev_added: str | None = None
+    kev_due: str | None = None
     epss: float | None = None
+    epss_percentile: float | None = None
     source: str = "nvd"
     url: str | None = None
 
@@ -120,7 +124,12 @@ class Advisory:
             fixed=data.get("fixed"),
             cvss=float(data["cvss"]) if data.get("cvss") is not None else None,
             kev=bool(data.get("kev") or False),
+            kev_added=data.get("kev_added"),
+            kev_due=data.get("kev_due"),
             epss=float(data["epss"]) if data.get("epss") is not None else None,
+            epss_percentile=(
+                float(data["epss_percentile"]) if data.get("epss_percentile") is not None else None
+            ),
             source=str(data.get("source") or "nvd"),
             url=data.get("url"),
         )
@@ -135,7 +144,10 @@ class Advisory:
             "fixed": self.fixed,
             "cvss": self.cvss,
             "kev": self.kev,
+            "kev_added": self.kev_added,
+            "kev_due": self.kev_due,
             "epss": self.epss,
+            "epss_percentile": self.epss_percentile,
             "source": self.source,
             "url": self.url,
         }
@@ -245,10 +257,15 @@ class Judgement:
 
 
 def _level_for(affected: list[Advisory]) -> str:
-    """影響ありの勧告から赤/黄を決める（7.5）。KEV か CVSS 9.0 以上で赤。"""
+    """影響ありの勧告から赤/黄を決める（7.5）。
+
+    赤 = KEV（悪用実績）/ CVSS 9.0 以上 / EPSS 0.5 以上（30 日以内に悪用される確率が 50% 超）。
+    """
     if any(a.kev for a in affected):
         return LEVEL_RED
     if any((a.cvss or 0.0) >= RED_CVSS for a in affected):
+        return LEVEL_RED
+    if any((a.epss or 0.0) >= RED_EPSS for a in affected):
         return LEVEL_RED
     return LEVEL_YELLOW
 
