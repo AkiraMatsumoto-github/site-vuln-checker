@@ -98,9 +98,45 @@ test("CVSS が低ければ黄", () => {
   assert.equal(judgements[0].action, "→ 3.20.0 へ更新");
 });
 
-test("修正版以降なら該当なし", () => {
-  const judgements = judge(analysis([plugin("elementor", "3.21.0")]), AdvisoryIndex.fromJSON(INDEX));
+test("修正版以降なら該当なし（重複 CVE は 1 件にまとめる）", () => {
+  // WordPress コアの勧告は系統ごとに別レコードになる。画面に同じ CVE を並べない。
+  const index = AdvisoryIndex.fromJSON({
+    advisories: ["6.0.9", "6.1.9", "6.2.9", "6.3.9", "7.0.5"].map((fixed, i) => ({
+      id: "CVE-2026-87902",
+      name: "WordPress",
+      slug: "wordpress",
+      affected_below: fixed,
+      fixed,
+      cvss: 8.1,
+      kev: true,
+      epss: 0.96,
+      range: i,
+    })),
+  });
+  const component = { kind: "core", name: "wordpress", version: "7.1.4" };
+  const judgements = judge(analysis([component]), index);
+  assert.equal(judgements.length, 1);
   assert.equal(judgements[0].level, LEVEL.NONE);
+  assert.match(judgements[0].action, /該当なし/);
+  assert.match(judgements[0].note, /すべて修正済み/);
+  assert.equal(judgements[0].advisories.length, 1, "同じ CVE を 1 行にまとめる");
+});
+
+test("該当する勧告も CVE 単位で 1 行（系統が複数当たっても）", () => {
+  const index = AdvisoryIndex.fromJSON({
+    advisories: ["8.2.35", "8.3.36"].map((fixed) => ({
+      id: "CVE-2026-109618",
+      name: "PHP",
+      slug: "php",
+      affected_below: fixed,
+      fixed,
+      cvss: 9.8,
+      kev: true,
+    })),
+  });
+  const judgements = judge(analysis([language("php", "8.1.27")]), index);
+  assert.equal(judgements[0].advisories.length, 1);
+  assert.equal(judgements[0].level, LEVEL.RED);
 });
 
 test("版が不明なら灰（緑にしない）", () => {

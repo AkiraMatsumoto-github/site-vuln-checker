@@ -152,6 +152,18 @@ button:disabled {
   color: var(--muted);
 }
 
+details summary {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+details .advisories {
+  margin-top: 4px;
+  padding-left: 12px;
+}
+
 .advisories code {
   font-family: ui-monospace, Consolas, monospace;
 }

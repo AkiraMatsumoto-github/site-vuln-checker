@@ -70,11 +70,20 @@ function renderJudgements(report) {
     item.append(element("p", "action", judgement.action));
     if (judgement.note) item.append(element("p", "empty", judgement.note));
 
-    const advisories = (judgement.advisories ?? []).map(advisoryLine);
+    const advisories = judgement.advisories ?? [];
     if (advisories.length) {
       const list = element("ul", "advisories");
-      list.append(...advisories);
-      item.append(list);
+      list.append(...advisories.map(advisoryLine));
+
+      if (level === "none") {
+        // 該当なしのときは、過去の勧告を**畳んで**出す（同じ CVE の山で誤解させない）
+        const details = document.createElement("details");
+        const summary = element("summary", "", `過去の勧告 ${advisories.length} 件を見る`);
+        details.append(summary, list);
+        item.append(details);
+      } else {
+        item.append(list);
+      }
     }
     container.append(item);
   }

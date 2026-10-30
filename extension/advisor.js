@@ -107,6 +107,15 @@ export function lifecycleNote(status) {
   return "";
 }
 
+/** 同じ CVE を 1 つにまとめる（CPE 由来の勧告は系統ごとに別レコードになるため）。 */
+function uniqueById(advisories) {
+  const seen = new Map();
+  for (const advisory of advisories) {
+    if (!seen.has(advisory.id)) seen.set(advisory.id, advisory);
+  }
+  return [...seen.values()];
+}
+
 /** 1 コンポーネントを勧告（CVE）と突き合わせる。 */
 function judgeAdvisories(component, index) {
   const advisories = index ? index.advisoriesFor(component) : [];
@@ -114,26 +123,28 @@ function judgeAdvisories(component, index) {
   if (!component.version) {
     // 版が分からない = 判定不能。勧告の履歴があるものだけ灰で知らせる。
     if (!advisories.length) return null;
+    const unique = uniqueById(advisories);
     return {
       component: component.name,
       version: null,
       level: LEVEL.GRAY,
       action: "バージョンを確認する",
-      advisories,
-      note: `過去に ${advisories.length} 件の勧告あり。版が不明なため判定できません`,
+      advisories: unique,
+      note: `過去に ${unique.length} 件の勧告あり。版が不明なため判定できません`,
     };
   }
 
   const affected = advisories.filter((advisory) => isAffected(component.version, advisory));
   if (!affected.length) {
     if (!advisories.length) return null;
+    const unique = uniqueById(advisories);
     return {
       component: component.name,
       version: component.version,
       level: LEVEL.NONE,
-      action: "該当なし（勧告は修正版以降）",
-      advisories,
-      note: "",
+      action: "該当なし（この版は修正済み）",
+      advisories: unique,
+      note: `過去に ${unique.length} 件の勧告がありますが、すべて修正済みです`,
     };
   }
 
@@ -145,8 +156,8 @@ function judgeAdvisories(component, index) {
     version: component.version,
     level: levelFor(affected),
     action: fixed.length ? `→ ${fixed[fixed.length - 1]} へ更新` : "修正版不明（ベンダに確認）",
-    advisories: [...affected].sort(
-      (a, b) => Number(!a.kev) - Number(!b.kev) || (b.cvss ?? 0) - (a.cvss ?? 0),
+    advisories: uniqueById(
+      [...affected].sort((a, b) => Number(!a.kev) - Number(!b.kev) || (b.cvss ?? 0) - (a.cvss ?? 0)),
     ),
     note: "",
   };

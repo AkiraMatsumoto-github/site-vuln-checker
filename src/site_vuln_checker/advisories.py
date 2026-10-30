@@ -313,6 +313,18 @@ def _level_for(affected: list[Advisory]) -> str:
     return LEVEL_YELLOW
 
 
+def _unique_by_id(advisories: list[Advisory]) -> tuple[Advisory, ...]:
+    """同じ CVE を 1 つにまとめる。
+
+    CPE 由来の勧告は**系統ごとに別レコード**になる（PHP なら 8.2/8.3/8.4/8.5）。
+    画面に同じ CVE を何行も出さないよう、ID で重複を除く。
+    """
+    seen: dict[str, Advisory] = {}
+    for advisory in advisories:
+        seen.setdefault(advisory.id, advisory)
+    return tuple(seen.values())
+
+
 def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | None:
     """1 コンポーネントを勧告（CVE）と突き合わせる。"""
     advisories = index.advisories_for(finding)
@@ -321,25 +333,28 @@ def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | Non
         # 版が分からない = 判定不能。ただし「勧告の履歴がある」ものだけ灰で知らせる。
         if not advisories:
             return None
+        unique = _unique_by_id(advisories)
         return Judgement(
             component=finding.name,
             version=None,
             level=LEVEL_GRAY,
             action="バージョンを確認する",
-            advisories=tuple(advisories),
-            note=f"過去に {len(advisories)} 件の勧告あり。版が不明なため判定できません",
+            advisories=unique,
+            note=f"過去に {len(unique)} 件の勧告あり。版が不明なため判定できません",
         )
 
     affected = [advisory for advisory in advisories if is_affected(finding.version, advisory)]
     if not affected:
         if not advisories:
             return None
+        unique = _unique_by_id(advisories)
         return Judgement(
             component=finding.name,
             version=finding.version,
             level=LEVEL_NONE,
-            action="該当なし（勧告は修正版以降）",
-            advisories=tuple(advisories),
+            action="該当なし（この版は修正済み）",
+            advisories=unique,
+            note=f"過去に {len(unique)} 件の勧告がありますが、すべて修正済みです",
         )
 
     fixed_versions = sorted({a.fixed for a in affected if a.fixed}, key=version_key)
@@ -349,7 +364,7 @@ def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | Non
         version=finding.version,
         level=_level_for(affected),
         action=action,
-        advisories=tuple(sorted(affected, key=lambda a: (not a.kev, -(a.cvss or 0.0)))),
+        advisories=_unique_by_id(sorted(affected, key=lambda a: (not a.kev, -(a.cvss or 0.0)))),
     )
 
 

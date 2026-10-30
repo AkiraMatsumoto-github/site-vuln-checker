@@ -269,6 +269,36 @@ def test_core_name_is_not_prefix_matched() -> None:
     assert [a.id for a in index.advisories_for(plugin)] == ["CVE-2025-7846"]
 
 
+def test_same_cve_across_branches_is_shown_once() -> None:
+    """同じ CVE が系統ごとに複数レコードあっても、判定では 1 件にまとめる。
+
+    実データでは WordPress コアの CVE が 6.0 / 6.1 / 6.2 / 7.0 … と系統別に
+    別レコードになるため、そのまま並べると同じ行が十数個並んで見える。
+    """
+    advisories = [
+        Advisory(
+            id="CVE-2026-87902",
+            name="WordPress",
+            slug="wordpress",
+            affected_below=fixed,
+            fixed=fixed,
+            cvss=8.1,
+            kev=True,
+        )
+        for fixed in ("6.0.9", "6.1.9", "6.2.9", "7.0.5")
+    ]
+    index = AdvisoryIndex(advisories=advisories)
+    analysis = Analysis(url="", findings=[Finding("core", "wordpress", "7.1.4", 1.0)])
+
+    judgements = judge(analysis, index)
+    assert len(judgements) == 1
+    assert judgements[0].level == LEVEL_NONE
+    assert "該当なし" in judgements[0].action
+    assert "すべて修正済み" in judgements[0].note
+    assert len(judgements[0].advisories) == 1, "同じ CVE は 1 行にまとめる"
+
+
+
 def test_eol_only_is_yellow_and_outdated_is_none() -> None:
     """EOL は黄（更新すべき）、同一枝のパッチ遅れは「—」（情報のみ）。"""
     lifecycles = LifecycleIndex(
