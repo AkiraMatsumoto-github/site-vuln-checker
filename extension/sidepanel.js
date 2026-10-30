@@ -46,7 +46,11 @@ function advisoryLine(advisory) {
   // 「どの Version が危ないか」を最初に出す（CVE 番号だけでは確認できない）
   const range = affectedRange(advisory);
   const parts = [range ? `${range}が影響` : "影響する Version は不明"];
-  if (advisory.fixed) parts.push(`${advisory.fixed} で修正`);
+  // 修正版が範囲から自明（「X より前が影響」＝X で修正）なときは繰り返さない
+  const fixed = advisory.fixed;
+  if (fixed && fixed !== advisory.affected_below && fixed !== advisory.affected_upto) {
+    parts.push(`${fixed} で修正`);
+  }
   if (advisory.cvss !== null && advisory.cvss !== undefined) parts.push(`深刻度 ${advisory.cvss}`);
   if (advisory.kev) parts.push("実際に悪用あり");
   // 0% は情報量が無いので出さない

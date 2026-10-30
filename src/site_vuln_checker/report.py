@@ -142,8 +142,10 @@ def _advisory_line(advisory: dict) -> str:
     parts = []
     range_text = _range_text(advisory)
     parts.append(f"{_esc(range_text)}が影響" if range_text else "影響する Version は不明")
-    if advisory.get("fixed"):
-        parts.append(f"{_esc(advisory['fixed'])} で修正")
+    fixed = advisory.get("fixed")
+    # 修正版が範囲から自明（「X より前が影響」なら X が修正版）なときは繰り返さない
+    if fixed and fixed not in (advisory.get("affected_below"), advisory.get("affected_upto")):
+        parts.append(f"{_esc(fixed)} で修正")
     if advisory.get("cvss") is not None:
         parts.append(f"深刻度 {_esc(advisory['cvss'])}")
     if advisory.get("kev"):
