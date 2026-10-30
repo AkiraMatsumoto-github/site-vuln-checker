@@ -139,6 +139,25 @@ test("該当する勧告も CVE 単位で 1 行（系統が複数当たっても
   assert.equal(judgements[0].level, LEVEL.RED);
 });
 
+test("入力された Version は、該当情報が無くても必ず表示する", () => {
+  const index = AdvisoryIndex.fromJSON({ advisories: [] });
+  const findings = [
+    {
+      kind: "language",
+      name: "php",
+      version: "9.9.9",
+      confidence: 1,
+      evidence: ["input:php"],
+      active: null,
+      entered: true,
+    },
+  ];
+  const judgements = judge({ findings }, index);
+  assert.equal(judgements.length, 1, "無反応に見えないよう灰で出す");
+  assert.equal(judgements[0].level, LEVEL.GRAY);
+  assert.match(judgements[0].note, /索引/);
+});
+
 test("版が不明なら灰（緑にしない）", () => {
   const judgements = judge(analysis([plugin("elementor", null)]), AdvisoryIndex.fromJSON(INDEX));
   assert.equal(judgements[0].level, LEVEL.GRAY);

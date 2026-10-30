@@ -293,6 +293,8 @@ function applyVersions(analysis, versions) {
       confidence: 1,
       evidence: [`input:${product}`],
       active: null,
+      // 利用者が入れた値であることを示す（判定結果が無くても表示するため）
+      entered: true,
     });
   }
   return analysis;

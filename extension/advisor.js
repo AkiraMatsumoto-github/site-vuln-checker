@@ -264,6 +264,21 @@ export function judge(analysis, index, today = new Date()) {
     merged.set(key, existing ? mergeJudgements(existing, judgement) : judgement);
   }
 
+  // 利用者が入力した Version は、**必ず何か表示する**（無反応に見えるのを防ぐ）
+  for (const component of findings) {
+    if (!component.entered || !component.version) continue;
+    const key = normalizeSlug(component.name);
+    if (merged.has(key)) continue;
+    merged.set(key, {
+      component: component.name,
+      version: component.version,
+      level: LEVEL.GRAY,
+      action: "判定できる情報が見つかりませんでした",
+      advisories: [],
+      note: "この Version に該当する弱点・サポート情報が索引にありません（索引の取得状況を確認してください）",
+    });
+  }
+
   return [...merged.values()].sort(
     (a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level] || a.component.localeCompare(b.component),
   );
