@@ -398,8 +398,7 @@ def lifecycle_note(status: LifecycleStatus) -> str:
         return f"{status.eol} にサポート終了（{status.cycle} 系の修正版は出ません）"
     if status.state == "eol_soon":
         return f"{status.eol} にサポート終了予定です"
-    if status.state == "outdated":
-        return "セキュリティ修正を含むかは分かりません（更新を検討してください）"
+    # outdated（同一系に新しい版がある）は action だけで足りるので補足しない
     return ""
 
 

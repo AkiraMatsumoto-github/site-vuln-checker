@@ -101,9 +101,7 @@ export function lifecycleNote(status) {
   if (status.state === "eol_soon") {
     return `${status.eol} にサポート終了予定です`;
   }
-  if (status.state === "outdated") {
-    return "セキュリティ修正を含むかは分かりません（更新を検討してください）";
-  }
+  // outdated（同じ系に新しい版がある）は action だけで足りるので補足しない
   return "";
 }
 
