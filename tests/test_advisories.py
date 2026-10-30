@@ -92,7 +92,7 @@ def test_unknown_version_is_gray_not_green() -> None:
     assert len(judgements) == 1
     assert judgements[0].level == LEVEL_GRAY
     assert judgements[0].version is None
-    assert "過去の勧告 1 件" in judgements[0].note
+    assert "Version が不明なため判定できません" in judgements[0].note
     assert judgements[0].is_issue is False, "灰は「更新すべきもの」とは別枠"
 
 

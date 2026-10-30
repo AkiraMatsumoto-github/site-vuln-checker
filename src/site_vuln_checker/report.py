@@ -123,16 +123,34 @@ _LEVEL_LABELS = {
 }
 
 
+def _range_text(advisory: dict) -> str | None:
+    """「影響する Version」を文章にする（1.4.2 以下 / 7.3.0 〜 8.2.35 未満 など）。"""
+    lower = advisory.get("affected_at_or_above")
+    below = advisory.get("affected_below")
+    upto = advisory.get("affected_upto")
+    if below:
+        return f"{lower} 〜 {below} 未満" if lower else f"{below} より前"
+    if upto:
+        return f"{lower} 〜 {upto} 以下" if lower else f"{upto} 以下"
+    if lower:
+        return f"{lower} 以降"
+    return None
+
+
 def _advisory_line(advisory: dict) -> str:
-    """`CVE-xxxx ｜ 深刻度 9.8 ｜ 実際に悪用あり ｜ 悪用の可能性 42%` のような 1 行。"""
-    cvss = advisory.get("cvss")
+    """`CVE-xxxx ｜ 1.4.2 以下が影響 ｜ 1.4.3 で修正 ｜ 深刻度 9.8` のような 1 行。"""
     parts = []
-    if cvss is not None:
-        parts.append(f"深刻度 {_esc(cvss)}")
+    range_text = _range_text(advisory)
+    parts.append(f"{_esc(range_text)}が影響" if range_text else "影響する Version は不明")
+    if advisory.get("fixed"):
+        parts.append(f"{_esc(advisory['fixed'])} で修正")
+    if advisory.get("cvss") is not None:
+        parts.append(f"深刻度 {_esc(advisory['cvss'])}")
     if advisory.get("kev"):
         parts.append("<b>実際に悪用あり</b>")
-    if advisory.get("epss") is not None:
-        parts.append(f"悪用の可能性 {float(advisory['epss']) * 100:.0f}%")
+    epss = advisory.get("epss")
+    if epss is not None and float(epss) >= 0.01:
+        parts.append(f"悪用の可能性 {float(epss) * 100:.0f}%")
     detail = " ｜ " + " ｜ ".join(parts) if parts else ""
     return f"<code>{_esc(advisory.get('id'))}</code>{detail}"
 

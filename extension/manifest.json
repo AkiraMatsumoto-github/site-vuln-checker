@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "サイト脆弱性チェッカー",
   "short_name": "サイト脆弱性",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "開いているサイトの技術構成を推定し、既知の脆弱性とサポート終了を「更新すべきもの」として表示します。",
   "permissions": ["sidePanel", "activeTab", "tabs", "scripting", "storage", "alarms"],
   "optional_host_permissions": ["https://*/*"],

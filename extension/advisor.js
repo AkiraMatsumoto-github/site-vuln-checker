@@ -141,7 +141,7 @@ function judgeAdvisories(component, index) {
       level: LEVEL.GRAY,
       action: "Version を確認してください",
       advisories: unique,
-      note: `Version が不明なため判定できません（過去の勧告 ${unique.length} 件）`,
+      note: "Version が不明なため判定できません。下の「影響する Version」と、実際の Version を比べてください",
     };
   }
 

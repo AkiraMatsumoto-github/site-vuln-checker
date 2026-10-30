@@ -24,17 +24,39 @@ function element(tag, className, text) {
   return node;
 }
 
+/**
+ * 勧告 1 件の「影響する Version」を文章にする。
+ *
+ * 例: ``1.4.2 以下`` / ``7.3.0 〜 8.2.35 未満`` / ``3.29.11 以下``。
+ * 範囲が分からない勧告は ``null``。
+ */
+function affectedRange(advisory) {
+  const lower = advisory.affected_at_or_above;
+  if (advisory.affected_below) {
+    return lower ? `${lower} 〜 ${advisory.affected_below} 未満` : `${advisory.affected_below} より前`;
+  }
+  if (advisory.affected_upto) {
+    return lower ? `${lower} 〜 ${advisory.affected_upto} 以下` : `${advisory.affected_upto} 以下`;
+  }
+  if (lower) return `${lower} 以降`;
+  return null;
+}
+
 function advisoryLine(advisory) {
-  // CVSS / EPSS という略語だけだと意味が伝わらないので、言葉で書く
-  const parts = [];
+  // 「どの Version が危ないか」を最初に出す（CVE 番号だけでは確認できない）
+  const range = affectedRange(advisory);
+  const parts = [range ? `${range}が影響` : "影響する Version は不明"];
+  if (advisory.fixed) parts.push(`${advisory.fixed} で修正`);
   if (advisory.cvss !== null && advisory.cvss !== undefined) parts.push(`深刻度 ${advisory.cvss}`);
   if (advisory.kev) parts.push("実際に悪用あり");
-  if (advisory.epss !== null && advisory.epss !== undefined) {
+  // 0% は情報量が無いので出さない
+  if (advisory.epss !== null && advisory.epss !== undefined && advisory.epss >= 0.01) {
     parts.push(`悪用の可能性 ${Math.round(advisory.epss * 100)}%`);
   }
+
   const item = element("li");
   item.append(element("code", "", advisory.id));
-  if (parts.length) item.append(document.createTextNode(` ｜ ${parts.join(" ｜ ")}`));
+  item.append(document.createTextNode(` ｜ ${parts.join(" ｜ ")}`));
   return item;
 }
 

@@ -161,7 +161,7 @@ test("入力された Version は、該当情報が無くても必ず表示す�
 test("版が不明なら灰（緑にしない）", () => {
   const judgements = judge(analysis([plugin("elementor", null)]), AdvisoryIndex.fromJSON(INDEX));
   assert.equal(judgements[0].level, LEVEL.GRAY);
-  assert.match(judgements[0].note, /過去の勧告 1 件/);
+  assert.match(judgements[0].note, /Version が不明なため判定できません/);
 });
 
 test("勧告が無いプラグインは判定を出さない", () => {

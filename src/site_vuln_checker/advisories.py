@@ -355,7 +355,10 @@ def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | Non
             level=LEVEL_GRAY,
             action="Version を確認してください",
             advisories=unique,
-            note=f"Version が不明なため判定できません（過去の勧告 {len(unique)} 件）",
+            note=(
+                "Version が不明なため判定できません。"
+                "下の「影響する Version」と、実際の Version を比べてください"
+            ),
         )
 
     affected = [advisory for advisory in advisories if is_affected(finding.version, advisory)]
