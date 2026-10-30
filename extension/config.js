@@ -11,6 +11,19 @@ export const RELEASE_INDEX_URL =
 /** 取得を試す URL（本番のみ）。 */
 export const INDEX_CANDIDATES = [RELEASE_INDEX_URL];
 
+/**
+ * 索引の取得に必要なオリジン。
+ *
+ * GitHub の Releases は **署名付き URL へ 302 リダイレクト**する
+ * （``github.com`` → ``release-assets.githubusercontent.com``）。
+ * 拡張の fetch はリダイレクト先にもホスト許可が要るため、両方を持つ。
+ */
+export const INDEX_ORIGINS = [
+  "https://github.com/*",
+  "https://*.githubusercontent.com/*",
+];
+
+
 
 /** 索引を「新しい」とみなす期間。Actions が毎日更新するので 24 時間。 */
 export const INDEX_TTL_MS = 24 * 60 * 60 * 1000;

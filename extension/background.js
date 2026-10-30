@@ -11,7 +11,7 @@
 // 方針（企画書 12.5）: 秘密（API キー）は持たない。通信は索引の取得だけ。
 
 import { AdvisoryIndex, judge, summarizeLevels } from "./advisor.js";
-import { INDEX_CANDIDATES, isIndexStale } from "./config.js";
+import { INDEX_CANDIDATES, INDEX_ORIGINS, isIndexStale } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
 import { originPattern } from "./patterns.js";
 
@@ -284,7 +284,7 @@ async function ensureFreshIndex() {
     // 許可が無い・配信が落ちている等。保存済みがあれば黙ってそれを使う。
     console.warn("索引の更新に失敗しました", error); // 拡張のサービスワーカー画面で確認できる
     const granted = await chrome.permissions
-      .contains({ origins: [originPattern(expected)] })
+      .contains({ origins: INDEX_ORIGINS })
       .catch(() => false);
     return {
       refreshed: false,

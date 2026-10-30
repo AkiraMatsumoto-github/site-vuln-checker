@@ -23,6 +23,9 @@ https://github.com/AkiraMatsumoto-github/site-vuln-checker/releases/latest/downl
 索引は `.github/workflows/publish-index.yml` が毎日 03:00 JST に作り直します
 （手元で配信する必要はありません）。画面下に `取得元 github.com` と表示されます。
 
+> 取得には **`github.com`** と **`*.githubusercontent.com`**（Releases の実体へリダイレクトされる先）への
+> 許可が必要です。初回のクリック時にまとめて求められます。
+
 > 許可しないと索引を取得できません。**閲覧 URL はどこにも送りません**（通信は索引の取得だけ）。
 
 ## 使い方

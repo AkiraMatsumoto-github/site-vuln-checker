@@ -1,7 +1,7 @@
 // サイドパネルの UI。判定は background が行い、ここは結果を描くだけ。
 // 値はすべて textContent で入れる（ページ由来の文字列を HTML として解釈しない）。
 
-import { INDEX_CANDIDATES } from "./config.js";
+import { INDEX_CANDIDATES, INDEX_ORIGINS } from "./config.js";
 import { originPattern } from "./patterns.js";
 
 const $ = (id) => document.getElementById(id);
@@ -227,13 +227,17 @@ async function ensureIndexPermission() {
   const needsPermission =
     !stored.indexUpdatedAt || stored.indexUrl !== INDEX_CANDIDATES[0];
 
-  for (const url of INDEX_CANDIDATES) {
-    const pattern = originPattern(url);
-    if (await chrome.permissions.contains({ origins: [pattern] }).catch(() => false)) return true;
-    if (needsPermission) {
-      const granted = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
-      if (granted) return true;
-    }
+  const haveAll = await chrome.permissions
+    .contains({ origins: INDEX_ORIGINS })
+    .catch(() => false);
+  if (haveAll) return true;
+
+  if (needsPermission) {
+    // github.com と リダイレクト先（*.githubusercontent.com）をまとめて求める
+    const granted = await chrome.permissions
+      .request({ origins: INDEX_ORIGINS })
+      .catch(() => false);
+    if (granted) return true;
   }
   return Boolean(stored.indexUpdatedAt);
 }
@@ -253,8 +257,9 @@ async function inspect({ askPermission = false } = {}) {
 
     // 索引を取得できなかった原因が「許可なし」なら、ここで許可を取って再試行
     if (report?.indexRefresh?.needsIndexPermission) {
-      const pattern = originPattern(INDEX_CANDIDATES[0]);
-      const granted = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
+      const granted = await chrome.permissions
+        .request({ origins: INDEX_ORIGINS })
+        .catch(() => false);
       if (granted) {
         report = await chrome.runtime.sendMessage({ type: "inspect" });
       }

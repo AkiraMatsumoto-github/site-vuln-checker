@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { INDEX_CANDIDATES, INDEX_TTL_MS, RELEASE_INDEX_URL, isIndexStale } from "../config.js";
+import { INDEX_CANDIDATES, INDEX_ORIGINS, INDEX_TTL_MS, RELEASE_INDEX_URL, isIndexStale } from "../config.js";
 import { originPattern } from "../patterns.js";
 
 // Chrome のマッチパターンはポートを含められない（含めると一致しない）。
@@ -23,6 +23,15 @@ test("索引の取得元は本番（GitHub Releases）だけ", () => {
 test("索引の URL は JSON を指している", () => {
   for (const url of INDEX_CANDIDATES) {
     assert.match(url, /\.json($|\?)/);
+  }
+});
+
+test("索引の取得には github.com とリダイレクト先の許可が要る", () => {
+  // Releases は署名付き URL（*.githubusercontent.com）へ 302 するため、両方必要
+  assert.ok(INDEX_ORIGINS.some((origin) => /^https:\/\/github\.com\/\*$/.test(origin)));
+  assert.ok(INDEX_ORIGINS.some((origin) => origin.includes("*.githubusercontent.com")));
+  for (const origin of INDEX_ORIGINS) {
+    assert.match(origin, /^https:\/\//, `https 以外は許可しない: ${origin}`);
   }
 });
 
