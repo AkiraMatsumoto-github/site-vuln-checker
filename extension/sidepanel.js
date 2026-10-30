@@ -242,6 +242,46 @@ async function ensureIndexPermission() {
   return Boolean(stored.indexUpdatedAt);
 }
 
+/**
+ * 調べる本体。許可が足りなければ取りに行き、**必要な分だけ繰り返す**。
+ *
+ * 索引の許可とサイトの許可は別オリジンなので、片方を取ったあとにもう片方が
+ * 足りないことが分かる場合がある（1 回の再試行では終わらない）。最大 3 回まで回す。
+ */
+async function inspectWithPermissions() {
+  let report = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    report = await chrome.runtime.sendMessage({ type: "inspect" });
+
+    if (report?.indexRefresh?.needsIndexPermission) {
+      const granted = await chrome.permissions
+        .request({ origins: INDEX_ORIGINS })
+        .catch(() => false);
+      if (granted) continue;
+      return report;
+    }
+
+    if (report?.needsSitePermission && report.origin) {
+      const granted = await chrome.permissions
+        .request({ origins: [originPattern(report.origin)] })
+        .catch(() => false);
+      if (granted) continue;
+      return report;
+    }
+
+    return report;
+  }
+  return report;
+}
+
+/** エラー文言を短くする（画面に出す用）。 */
+function shortReason(message) {
+  return String(message ?? "")
+    .replace(/^TypeError:\s*/, "")
+    .replace(/^Error:\s*/, "")
+    .slice(0, 80);
+}
+
 async function inspect({ askPermission = false } = {}) {
   const button = $("inspect");
   button.disabled = true;
@@ -253,43 +293,28 @@ async function inspect({ askPermission = false } = {}) {
       await askHeaderPermission();
     }
 
-    let report = await chrome.runtime.sendMessage({ type: "inspect" });
+    const report = await inspectWithPermissions();
 
-    // 索引を取得できなかった原因が「許可なし」なら、ここで許可を取って再試行
-    if (report?.indexRefresh?.needsIndexPermission) {
-      const granted = await chrome.permissions
-        .request({ origins: INDEX_ORIGINS })
-        .catch(() => false);
-      if (granted) {
-        report = await chrome.runtime.sendMessage({ type: "inspect" });
-      }
+    if (report?.needsSitePermission) {
+      $("status").textContent =
+        "このサイトへのアクセスが許可されませんでした。ツールバーのアイコンをクリックしてから、もう一度お試しください。";
+      return;
     }
-
-    // このタブを読む許可が無い（アイコンを押さずにパネルを開いた等）→ 許可を取って再試行
-    if (report?.needsSitePermission && report.origin) {
-      const pattern = originPattern(report.origin);
-      const granted = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
-      if (granted) {
-        report = await chrome.runtime.sendMessage({ type: "inspect" });
-      } else {
-        $("status").textContent =
-          "このサイトへのアクセスが許可されませんでした。ツールバーのアイコンをクリックしてから、もう一度お試しください。";
-        return;
-      }
-    }
-
     if (report?.error) {
       $("status").textContent = report.error;
       return;
     }
+
     renderReport(report);
-    // 索引の取得に失敗したときだけ理由を出す（古い索引で判定は続く）
+
+    // 状態の文言は、今回の結果だけを見て決める（前回の文言を残さない）
     const refresh = report.indexRefresh ?? {};
     if (refresh.needsIndexPermission) {
       $("status").textContent =
-        "索引の取得が許可されていません。github.com へのアクセスを許可してから、もう一度お試しください。";
-    } else if (refresh.error && refresh.usedCached) {
-      $("status").textContent = "索引を更新できませんでした（前回の索引で判定）";
+        "索引の取得が許可されていません。akiramatsumoto-github.github.io へのアクセスを許可してから、もう一度お試しください。";
+    } else if (refresh.error) {
+      const cached = refresh.usedCached ? "（前回の索引で判定）" : "";
+      $("status").textContent = `索引を更新できませんでした: ${shortReason(refresh.error)}${cached}`;
     } else {
       $("status").textContent = "";
     }
