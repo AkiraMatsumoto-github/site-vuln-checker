@@ -300,6 +300,14 @@ def test_same_cve_across_branches_is_shown_once() -> None:
     assert len(judgements[0].advisories) == 1, "同じ CVE は 1 行にまとめる"
 
 
+def test_lower_bound_only_is_open_ended() -> None:
+    """下限だけの勧告は「X 以降すべてが影響」として扱う（見逃しを防ぐ）。"""
+    advisory = Advisory(id="CVE-X", name="Foo", affected_at_or_above="2.0.0")
+    assert is_affected("1.9.9", advisory) is False
+    assert is_affected("2.0.0", advisory) is True
+    assert is_affected("3.1.0", advisory) is True
+
+
 
 def test_eol_only_is_yellow_and_outdated_is_none() -> None:
     """EOL は黄（更新すべき）、同一枝のパッチ遅れは「—」（情報のみ）。"""

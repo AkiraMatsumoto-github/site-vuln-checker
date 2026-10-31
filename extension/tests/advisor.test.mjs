@@ -277,6 +277,39 @@ test("PHP 8.1 は EOL で黄（PHP2Shell の CVE と合わさって赤）", () =
   // 脆弱性だけを見れば赤、EOL だけを見れば黄。合わさったら赤で 1 行。
   const judgements = judge(analysis([language("php", "8.1.27")]), index, TODAY);
   assert.equal(judgements.length, 1);
+
+// --- 範囲の扱い（下限のみ・複数範囲）-----------------------------------------
+
+test("下限だけの勧告は「X 以降すべてが影響」として扱う", () => {
+  const advisory = { id: "CVE-X", name: "Foo", affected_at_or_above: "2.0.0" };
+  assert.equal(isAffected("1.9.9", advisory), false);
+  assert.equal(isAffected("2.0.0", advisory), true);
+  assert.equal(isAffected("3.1.0", advisory), true, "上限が無いので以降すべて");
+});
+
+test("同じ CVE の複数範囲は ranges に残す（1 つに潰さない）", () => {
+  const index = AdvisoryIndex.fromJSON({
+    advisories: [
+      ["7.3.0", "8.2.35"],
+      ["8.3.0", "8.3.36"],
+      ["8.4.0", "8.4.27"],
+      ["8.5.0", "8.5.12"],
+    ].map(([start, end]) => ({
+      id: "CVE-2026-109618",
+      name: "PHP",
+      slug: "php",
+      affected_at_or_above: start,
+      affected_below: end,
+      fixed: end,
+      cvss: 9.2,
+      kev: true,
+    })),
+  });
+  const judgements = judge({ findings: [language("php", null)] }, index);
+  assert.equal(judgements[0].advisories.length, 1, "同じ CVE は 1 行");
+  assert.equal(judgements[0].advisories[0].ranges.length, 4, "範囲はすべて残す");
+});
+
   const only = judgements[0];
   assert.equal(only.level, LEVEL.RED);
   assert.match(only.action, /8\.2\.35/); // 修正版（脆弱性）

@@ -81,6 +81,9 @@ def is_affected(version: str, advisory: Advisory) -> bool:
         version, advisory.affected_at_or_above
     ) < 0:
         return False
+    # 上限が無く下限だけの勧告は「X 以降すべてが影響」と解釈する
+    if not (advisory.affected_below or advisory.affected_upto):
+        return bool(advisory.affected_at_or_above)
     if advisory.affected_below and compare_versions(version, advisory.affected_below) < 0:
         return True
     return bool(
@@ -198,8 +201,13 @@ class AdvisoryIndex:
         self._by_key: dict[str, list[Advisory]] = {}
         self._by_name: dict[str, list[Advisory]] = {}
         for advisory in self.advisories:
-            self._by_key.setdefault(advisory.key, []).append(advisory)
-            self._by_name.setdefault(normalize_slug(advisory.name), []).append(advisory)
+            # 正規化すると空になる名前（日本語だけの名前など）は索引に入れない。
+            # 空キーを入れると、名前が空のコンポーネントが全部一致してしまう。
+            if advisory.key:
+                self._by_key.setdefault(advisory.key, []).append(advisory)
+            name_key = normalize_slug(advisory.name)
+            if name_key:
+                self._by_name.setdefault(name_key, []).append(advisory)
         self._sorted_names: list[str] = sorted(self._by_name)
 
     def lookup(self, name_or_slug: str) -> list[Advisory]:

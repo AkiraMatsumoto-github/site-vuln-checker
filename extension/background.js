@@ -213,7 +213,16 @@ async function inspectActiveTab() {
   analysis.notes = buildNotes(analysis.findings);
   analysis.notes.push(...versionNotes);
   if (siteHealth) {
-    analysis.notes.push("PHP などの値は「サイトヘルス」から読み取った実測値です");
+    const readAt = siteHealth.readAt ? new Date(siteHealth.readAt) : null;
+    const days = readAt ? Math.floor((Date.now() - readAt.getTime()) / 86400000) : null;
+    analysis.notes.push(
+      readAt
+        ? `PHP などの値は「サイトヘルス」から読み取った実測値です（${readAt.toLocaleDateString()} に読み取り）`
+        : "PHP などの値は「サイトヘルス」から読み取った実測値です",
+    );
+    if (days !== null && days > 90) {
+      analysis.notes.push("サイトヘルスの読み取りから 90 日以上経っています。読み直してください");
+    }
   }
   const indexRefresh = await ensureFreshIndex();
   const index = await loadIndex();
@@ -430,13 +439,14 @@ async function readSiteHealth() {
 
   const info = parseSiteHealth(sections);
   const origin = originOf(tab.url);
+  const record = { ...info, readAt: new Date().toISOString() };
   if (origin) {
     const stored = await chrome.storage.local.get(SITE_HEALTH_KEY);
     const all = stored[SITE_HEALTH_KEY] ?? {};
-    all[origin] = info;
+    all[origin] = record;
     await chrome.storage.local.set({ [SITE_HEALTH_KEY]: all });
   }
-  return { origin, info };
+  return { origin, info: record };
 }
 
 /** サイトヘルスの値で検出結果を上書きする（実測値なので優先する）。 */

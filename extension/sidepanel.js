@@ -1,6 +1,7 @@
 // サイドパネルの UI。判定は background が行い、ここは結果を描くだけ。
 // 値はすべて textContent で入れる（ページ由来の文字列を HTML として解釈しない）。
 
+import { affectedRangeText } from "./advisor.js";
 import { INDEX_CANDIDATES, INDEX_ORIGINS } from "./config.js";
 import { originPattern } from "./patterns.js";
 
@@ -26,29 +27,12 @@ function element(tag, className, text) {
   return node;
 }
 
-/**
- * 勧告 1 件の「影響する Version」を文章にする。
- *
- * 例: ``1.4.2 以下`` / ``7.3.0 〜 8.2.35 未満`` / ``3.29.11 以下``。
- * 範囲が分からない勧告は ``null``。
- */
-function affectedRange(advisory) {
-  const lower = advisory.affected_at_or_above;
-  if (advisory.affected_below) {
-    return lower ? `${lower} 〜 ${advisory.affected_below} 未満` : `${advisory.affected_below} より前`;
-  }
-  if (advisory.affected_upto) {
-    return lower ? `${lower} 〜 ${advisory.affected_upto} 以下` : `${advisory.affected_upto} 以下`;
-  }
-  if (lower) return `${lower} 以降`;
-  return null;
-}
 
+/** 1 件分の勧告行（「どの Version が危ないか」を先に出す）。 */
 function advisoryLine(advisory) {
-  // 「どの Version が危ないか」を最初に出す（CVE 番号だけでは確認できない）
-  const range = affectedRange(advisory);
-  const parts = [range ? `${range}が影響` : "影響する Version は不明"];
-  // 修正版が範囲から自明（「X より前が影響」＝X で修正）なときは繰り返さない
+  const ranges = (advisory.ranges ?? [affectedRangeText(advisory)]).filter(Boolean);
+  const parts = [ranges.length ? `${ranges.join(" / ")}が影響` : "影響する Version は不明"];
+  // 修正版が範囲から自明（「X より前が影響」なら X が修正版）なときは繰り返さない
   const fixed = advisory.fixed;
   if (fixed && fixed !== advisory.affected_below && fixed !== advisory.affected_upto) {
     parts.push(`${fixed} で修正`);

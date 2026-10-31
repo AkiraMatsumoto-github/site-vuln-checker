@@ -55,6 +55,11 @@ export function isAffected(version, advisory) {
   ) {
     return false;
   }
+  // 上限が無く下限だけの勧告は「X 以降すべてが影響」と解釈する
+  // （CPE に versionStartIncluding だけがある場合。放置すると見逃す）
+  if (!advisory.affected_below && !advisory.affected_upto) {
+    return Boolean(advisory.affected_at_or_above);
+  }
   if (advisory.affected_below && compareVersions(version, advisory.affected_below) < 0) return true;
   return Boolean(advisory.affected_upto && compareVersions(version, advisory.affected_upto) <= 0);
 }
@@ -105,13 +110,42 @@ export function lifecycleNote(status) {
   return "";
 }
 
-/** 同じ CVE を 1 つにまとめる（CPE 由来の勧告は系統ごとに別レコードになるため）。 */
-function uniqueById(advisories) {
-  const seen = new Map();
-  for (const advisory of advisories) {
-    if (!seen.has(advisory.id)) seen.set(advisory.id, advisory);
+/**
+ * 勧告の「影響する Version」を文章にする（画面・CLI で同じ表現）。
+ *
+ * 例: ``1.4.2 以下`` / ``7.3.0 〜 8.2.35 未満`` / ``3.29.11 以下``。
+ * 範囲が分からない勧告は ``null``。
+ */
+export function affectedRangeText(advisory) {
+  const lower = advisory.affected_at_or_above;
+  if (advisory.affected_below) {
+    return lower ? `${lower} 〜 ${advisory.affected_below} 未満` : `${advisory.affected_below} より前`;
   }
-  return [...seen.values()];
+  if (advisory.affected_upto) {
+    return lower ? `${lower} 〜 ${advisory.affected_upto} 以下` : `${advisory.affected_upto} 以下`;
+  }
+  if (lower) return `${lower} 以降`;
+  return null;
+}
+
+/**
+ * 同じ CVE を 1 つにまとめる（CPE 由来の勧告は系統ごとに別レコードになるため）。
+ *
+ * **範囲は落とさない**: PHP のように 1 つの CVE が 8.2/8.3/8.4/8.5 で別範囲を持つ場合、
+ * 1 つだけ表示すると「自分の Version が該当するか」を判断できない。
+ * 複数あるときは ``ranges`` に全部入れて、画面側で並べる。
+ */
+function uniqueById(advisories) {
+  const groups = new Map();
+  for (const advisory of advisories) {
+    if (!groups.has(advisory.id)) groups.set(advisory.id, []);
+    groups.get(advisory.id).push(advisory);
+  }
+  return [...groups.values()].map((list) => {
+    const [first] = list;
+    const ranges = [...new Set(list.map(affectedRangeText).filter(Boolean))];
+    return ranges.length > 1 ? { ...first, ranges } : first;
+  });
 }
 
 /** 「どれくらい危ないか」を 1 文で表す（CVE の羅列ではなく理由を伝える）。 */
@@ -303,12 +337,18 @@ export class AdvisoryIndex {
     this._byName = new Map();
     for (const advisory of advisories) {
       const key = normalizeSlug(advisory.slug || advisory.name);
-      if (!this._byKey.has(key)) this._byKey.set(key, []);
-      this._byKey.get(key).push(advisory);
+      // 正規化すると空になる名前（日本語だけの名前など）は索引に入れない。
+      // 空キーを入れると、名前が空のコンポーネントが全部一致してしまう。
+      if (key) {
+        if (!this._byKey.has(key)) this._byKey.set(key, []);
+        this._byKey.get(key).push(advisory);
+      }
 
       const nameKey = normalizeSlug(advisory.name);
-      if (!this._byName.has(nameKey)) this._byName.set(nameKey, []);
-      this._byName.get(nameKey).push(advisory);
+      if (nameKey) {
+        if (!this._byName.has(nameKey)) this._byName.set(nameKey, []);
+        this._byName.get(nameKey).push(advisory);
+      }
     }
     // 前方一致を O(log n) で引くため、正規化した名前を並べておく
     this._sortedNames = [...this._byName.keys()].sort();
