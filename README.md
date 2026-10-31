@@ -132,7 +132,7 @@ PHP はサーバー側の設定で、公開していないサイトが多いた�
 
 索引は**既定で直近 1 年**です。NVD の API は 1 回の期間指定が **120 日まで**なので、
 **120 日ずつ 4 回に分けて取得して積み上げます**。全期間が必要なときは `--all`、
-日々の更新は `--days 14 --merge` で差分だけ足します。
+日々の更新は `--days 3 --merge` で差分だけ足します。
 
 直近 1 年で作った索引の実測値です。
 
@@ -277,8 +277,8 @@ uv run svc-enrich --index out/advisories.json
 uv run svc-eol --out out/advisories.json
 
 # 全期間（2005 年以降）にしたいときは --all（数分かかります）
-# 2 回目以降は差分だけ足す（例: 直近 14 日）
-uv run svc-ingest --days 14 --merge --out out/advisories.json
+# 2 回目以降は差分だけ足す（例: 直近 3 日）
+uv run svc-ingest --days 3 --merge --out out/advisories.json
 uv run svc-enrich --index out/advisories.json
 ```
 

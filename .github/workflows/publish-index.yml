@@ -78,13 +78,13 @@ jobs:
             echo "前回の索引なし（今回フルで作る）"
           fi
 
-      - name: 索引を作る（前回があれば直近 14 日だけ足す）
+      - name: 索引を作る（前回があれば直近 3 日だけ足す）
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           set -euo pipefail
           if [ -f "$INDEX_PATH" ]; then
-            uv run svc-ingest --days 14 --merge --out "$INDEX_PATH"
+            uv run svc-ingest --days 3 --merge --out "$INDEX_PATH"
           else
             uv run svc-ingest --out "$INDEX_PATH"
           fi
