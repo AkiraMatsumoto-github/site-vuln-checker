@@ -40,8 +40,9 @@ https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json
 4. アイコンに、赤（または黄・不明）の件数が出る
 5. **PHP やフレームワークの版が分かる場合**は「バージョンを入力」に入れて **追加**。
    そのサイトのぶんだけ保存され、サポート終了（EOL）と本体の脆弱性を判定する
-6. **自分のサイトなら**、WordPress の「ツール → サイトヘルス → 情報」を開いた状態で同じボタンを押すと、
-   PHP・データベース・全プラグインの**実測値**まで読み取る（ボタンは増えない。URL で自動的に判断する）
+6. **自分のサイトなら**、WordPress の「ツール → サイトヘルス」を開いた状態で同じボタンを押すと、
+   PHP・データベース・全プラグインの**実測値**まで読み取る（ボタンは増えない。「情報」タブでなくても
+   表はページ内にあるので読める。管理画面のディレクトリ名を変えていても動く）
 
 ## 制約（正直な限界）
 
@@ -69,6 +70,14 @@ node --test extension/tests/detector.test.mjs extension/tests/advisor.test.mjs
 ```
 
 CI（GitHub Actions）でも同じコマンドを実行しています。
+
+## サポート・プライバシー
+
+- **不具合・ご意見・異議申立て**: [GitHub Issues](https://github.com/AkiraMatsumoto-github/site-vuln-checker/issues)
+  （自分のサイトについて判定の訂正・掲載停止を希望する場合は、対象 URL と該当箇所をお書きください）
+- **プライバシーポリシー**: https://akiramatsumoto-github.github.io/site-vuln-checker/privacy.html
+  （ソースは `docs/privacy.html`。Pages へは `publish-index.yml` が毎日コピーします）
+- サイドパネルのフッターにも同じリンクがあります
 
 ## Chrome Web Store に出すときの注意（企画書 20 章）
 

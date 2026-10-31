@@ -164,6 +164,8 @@ jobs:
           set -euo pipefail
           mkdir -p public
           cp "$INDEX_PATH" public/advisories.json
+          # プライバシーポリシー（Chrome ウェブストアの「プライバシーポリシー URL」に指定する）
+          cp docs/privacy.html public/privacy.html
           ls -l public
 
       - uses: actions/configure-pages@v5
@@ -178,6 +180,7 @@ jobs:
           set -euo pipefail
           for url in \
             "https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json" \
+            "https://akiramatsumoto-github.github.io/site-vuln-checker/privacy.html" \
             "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/advisories.json"; do
             code=$(curl -sL -o /dev/null -w '%{http_code}' "$url")
             echo "$url -> HTTP $code"
@@ -191,6 +194,7 @@ jobs:
             echo "### 索引の公開結果"
             echo ""
             echo "- 拡張が読む索引: https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json"
+            echo "- プライバシーポリシー: https://akiramatsumoto-github.github.io/site-vuln-checker/privacy.html"
             echo "- リリース（履歴つき）: https://github.com/${{ github.repository }}/releases/tag/index"
             echo "- 実行: ${{ github.event_name }}（フル再構築: ${{ inputs.full || false }}）"
           } >> "$GITHUB_STEP_SUMMARY"

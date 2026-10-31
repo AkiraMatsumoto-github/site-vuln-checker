@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>プライバシーポリシー — サイト脆弱性チェッカー</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0 auto;
+        max-width: 780px;
+        padding: 28px 20px 60px;
+        font-family: system-ui, "Segoe UI", "Hiragino Sans", sans-serif;
+        line-height: 1.8;
+        font-size: 15px;
+      }
+      h1 { font-size: 1.5rem; margin: 0 0 4px; }
+      h2 { font-size: 1.1rem; margin: 28px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #ddd; }
+      p, li { margin: 6px 0; }
+      .sub { color: #666; font-size: 0.86rem; margin: 0 0 20px; }
+      .lead { background: #f4f7fb; border-left: 4px solid #2b6cb0; padding: 12px 14px; border-radius: 6px; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.92rem; margin: 8px 0; }
+      th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
+      th { background: #fafafa; font-weight: 600; }
+      code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; }
+      a { color: #2b6cb0; }
+      footer { margin-top: 36px; padding-top: 12px; border-top: 1px solid #e3e3e3; color: #666; font-size: 0.86rem; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #14161a; color: #e6e6e6; }
+        .lead { background: #1c2430; }
+        th { background: #1b1e24; }
+        h2, th, td, footer { border-color: #2a2f38; }
+        .sub, footer { color: #9aa3ad; }
+        a { color: #7fb0e8; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>プライバシーポリシー</h1>
+    <p class="sub">
+      対象: Chrome 拡張「サイト脆弱性チェッカー」（Site Vulnerability Checker）<br />
+      制定日: 2026-10-29 ／ 最終更新: 2026-10-30
+    </p>
+
+    <p class="lead">
+      <strong>要点:</strong> 閲覧している URL・ページの内容・入力したバージョンを、<strong>サーバへ送りません</strong>。
+      判定はすべてお使いの端末内で行います。テレメトリ（利用状況の収集）も行いません。
+      外部通信は、<strong>脆弱性の一覧表（索引）を配信元から取得する 1 種類だけ</strong>です。
+    </p>
+
+    <h2>1. このポリシーが対象とするもの</h2>
+    <p>
+      Chrome ウェブストアで配布する Chrome 拡張「サイト脆弱性チェッカー」（以下「本拡張」）と、
+      本拡張が取得する脆弱性の索引（以下「索引」）に適用されます。
+      本ポリシーは、本拡張をインストールして利用する方、および本拡張が表示の対象とする
+      ウェブサイトの所有者の方を対象にしています。
+    </p>
+
+    <h2>2. 収集しない情報</h2>
+    <p>本拡張は、次の情報を<strong>収集せず、端末外へ送信しません</strong>。</p>
+    <ul>
+      <li>閲覧しているページの URL、ページの本文、スクリーンショット</li>
+      <li>ページから読み取った技術情報（WordPress・プラグイン・テーマ・PHP・JavaScript ライブラリの名前とバージョン）</li>
+      <li>WordPress の管理画面「サイトヘルス」から読み取った内容（PHP・データベース・プラグインのバージョンなど）</li>
+      <li>アカウント情報、Cookie、入力フォームの内容</li>
+      <li>IP アドレス、位置情報、端末の識別子、利用状況（テレメトリ・クラッシュレポート）</li>
+    </ul>
+    <p>
+      本拡張には、利用者を識別する機能（ログイン・アカウント・解析タグ）がありません。
+      広告・行動ターゲティングも行いません。
+    </p>
+    <h2>3. 端末内に保存する情報</h2>
+    <p>
+      本拡張は、動作のために次の情報を<strong>お使いの端末内（Chrome の拡張機能用ストレージ）にのみ</strong>保存します。
+      いずれもサーバへは送信しません。
+    </p>
+    <table>
+      <tr>
+        <th>保存する内容</th>
+        <th>目的</th>
+        <th>保存先と削除方法</th>
+      </tr>
+      <tr>
+        <td>索引（<code>advisories.json</code>）と最終取得日時</td>
+        <td>通信を減らし、取得できないときでも判定するため</td>
+        <td><code>chrome.storage.local</code>／拡張を削除すると消えます</td>
+      </tr>
+      <tr>
+        <td>入力した PHP などのバージョン（サイトごと）</td>
+        <td>次回以降も同じ条件で判定するため</td>
+        <td><code>chrome.storage.local</code>／画面の「×」で削除できます</td>
+      </tr>
+      <tr>
+        <td>「サイトヘルス」から読み取った値（サイトごと・読み取り日時つき）</td>
+        <td>外部からは見えない PHP などの実測値を使うため</td>
+        <td><code>chrome.storage.local</code>／拡張を削除すると消えます</td>
+      </tr>
+      <tr>
+        <td>直前の判定結果</td>
+        <td>パネルを開き直したときに再表示するため</td>
+        <td><code>chrome.storage.session</code>（ブラウザを閉じると消えます）</td>
+      </tr>
+    </table>
+
+    <h2>4. 外部との通信</h2>
+    <table>
+      <tr>
+        <th>通信</th>
+        <th>内容</th>
+        <th>送信する情報</th>
+      </tr>
+      <tr>
+        <td>
+          索引の取得<br />
+          <code>https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json</code>
+        </td>
+        <td>
+          「このサイトを調べる」を押したとき（最短 5 分間隔）と、1 日 1 回の定期更新。
+          変化が無ければ <code>304</code> が返るだけで本文は取得しません
+        </td>
+        <td>
+          送信するのは<strong>更新確認用のヘッダ（ETag）だけ</strong>です。
+          URL・ページ内容・判定結果・入力値は含みません。
+        </td>
+      </tr>
+      <tr>
+        <td>調べているサイトへの <code>HEAD</code> 要求</td>
+        <td>
+          <strong>利用者がそのサイトへのアクセスを許可した場合だけ</strong>、サーバが公開している
+          <code>X-Powered-By</code> などの応答ヘッダを読むために 1 回だけ送ります
+          （本文は取得しません。許可しなくても判定できます）
+        </td>
+        <td>
+          通常のブラウザと同じ要求です。Cookie は送りません（<code>credentials: "omit"</code>）。
+          管理画面（<code>wp-admin</code> など）やサイトヘルスの画面では送りません。
+        </td>
+      </tr>
+    </table>
+    <p>
+      上記以外の宛先への通信は行いません。<strong>第三者への提供・販売・共有は行いません。</strong>
+      本拡張はリモートコード（外部から読み込んだ JavaScript）を実行しません。索引はデータとしてのみ扱います。
+    </p>
+
+    <h2>5. 権限とその用途</h2>
+    <table>
+      <tr><th>権限</th><th>用途</th></tr>
+      <tr><td><code>sidePanel</code></td><td>判定結果をサイドパネルに表示するため</td></tr>
+      <tr>
+        <td><code>activeTab</code> / <code>scripting</code></td>
+        <td>利用者が「このサイトを調べる」を押したとき、そのタブの HTML と読み込み済みリソースの URL を読むため</td>
+      </tr>
+      <tr><td><code>tabs</code></td><td>調べる対象のタブの URL とタイトルを取得するため</td></tr>
+      <tr><td><code>storage</code></td><td>索引・入力値・サイトヘルスの読み取り値を端末内に保存するため</td></tr>
+      <tr><td><code>alarms</code></td><td>索引を 1 日 1 回更新するため</td></tr>
+      <tr>
+        <td><code>optional_host_permissions</code>（<code>https://*/*</code>）</td>
+        <td>
+          上記の <code>HEAD</code> 要求のために、サイトごとの許可を<strong>任意で</strong>求めるため（拒否できます）
+        </td>
+      </tr>
+    </table>
+    <h2>6. 第三者のウェブサイトを調べる機能について</h2>
+    <ul>
+      <li>本拡張は、<strong>誰でも閲覧できる公開ページに表示・読み込みされている情報だけ</strong>を読み取ります。</li>
+      <li>ポートスキャン・ディレクトリ探索・ログイン試行・攻撃コードの送信などの<strong>能動的なスキャンは行いません</strong>。</li>
+      <li>
+        <strong>第三者のサイトの管理画面は読みません。</strong>
+        「サイトヘルス」の読み取りは、利用者が<strong>自分でログインしている画面</strong>に表示されている値を読むだけで、
+        認証を突破する機能はありません。
+      </li>
+      <li>判定は公開情報に基づく<strong>推定</strong>であり、サイトの安全性を保証するものではありません。</li>
+    </ul>
+
+    <h2>7. データの出典とライセンス</h2>
+    <p>索引は次の公開データから作成しています（いずれも再配布可能な条件で公開されているものです）。</p>
+    <ul>
+      <li>NVD（NIST National Vulnerability Database）</li>
+      <li>GitHub Advisory Database（CC-BY-4.0）</li>
+      <li>CISA KEV（Known Exploited Vulnerabilities カタログ）</li>
+      <li>FIRST EPSS（Exploit Prediction Scoring System）</li>
+      <li>JVN iPedia（JVN）</li>
+      <li>endoflife.date（サポート終了情報）</li>
+      <li>WordPress.org Plugin API（プラグイン名とバージョンの対応）</li>
+    </ul>
+    <p>本拡張のプログラムは MIT ライセンスで公開しています。</p>
+
+    <h2>8. 免責</h2>
+    <p>
+      本拡張の判定は<strong>推定</strong>です。正確性・完全性・最新性を保証しません。
+      「不明」は「安全」ではありません。本拡張の利用により生じた損害について、開発者は責任を負いかねます。
+      重要な判断は、ベンダの公式情報や専門家の確認とあわせて行ってください。
+    </p>
+
+    <h2>9. お問い合わせ・異議申立て</h2>
+    <p>
+      不具合の報告、ご意見、および<strong>掲載内容に関する異議申立て</strong>（ご自身のサイトについて
+      判定の訂正・掲載停止をご希望の場合など）は、次の窓口で受け付けます。
+    </p>
+    <ul>
+      <li>
+        窓口:
+        <a href="https://github.com/AkiraMatsumoto-github/site-vuln-checker/issues" target="_blank" rel="noopener noreferrer">GitHub Issues</a>
+      </li>
+      <li>
+        異議申立ての際は、<strong>対象の URL・該当箇所（どの表示についてか）・ご希望（訂正／削除）</strong>をお書きください。
+        手元で確認できない点がある場合は、こちらから追加の確認をお願いすることがあります。
+      </li>
+      <li>公開の場に置きたくない内容が含まれる場合は、その旨をお書きください。個別の連絡方法をご案内します。</li>
+      <li>受付から<strong>3 営業日以内</strong>の初回応答を目安とします（個人運営のため、遅れる場合があります）。</li>
+    </ul>
+
+    <h2>10. 本ポリシーの改定</h2>
+    <p>
+      機能の追加や法令の変更に応じて、本ポリシーを改定することがあります。
+      改定した場合は、このページの「最終更新」とリポジトリの変更履歴でお知らせします。
+      重要な変更がある場合は、拡張の更新情報でもお伝えします。
+    </p>
+
+    <h2>11. 準拠する方針</h2>
+    <p>
+      本拡張は、Chrome ウェブストアのユーザーデータポリシー（Limited Use の要件を含む）に従います。
+      取得した情報を、本拡張の機能提供以外の目的に利用することはありません。
+    </p>
+
+    <footer>
+      サイト脆弱性チェッカー（Site Vulnerability Checker）／
+      <a href="https://github.com/AkiraMatsumoto-github/site-vuln-checker" target="_blank" rel="noopener noreferrer">ソースコード（GitHub）</a>
+    </footer>
+  </body>
+</html>
