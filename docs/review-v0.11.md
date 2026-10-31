@@ -2,7 +2,7 @@
 
 対象: `extension/`（MV3 拡張）、`src/site_vuln_checker/`（索引生成 CLI）、`.github/workflows/`
 方法: 全ソースを通読し、**実際に動かして**確認（Node のスタブで拡張の処理を再現、Python のテスト、
-実サイト 2 件、公開中の索引）。テストは Python 121 / JS 41 件。
+実サイト 2 件、公開中の索引）。テストは Python 128 / JS 45 件。
 
 ## 0. このレビューで直したもの
 
@@ -15,14 +15,14 @@
 | 5 | 中 | **EOL の「同じ系に新しい版」が緑（該当なし）枠に出る**（見出しと意味が混ざる） | **「情報」（青）を追加**し、`outdated` をそこへ移動 |
 | 6 | 低 | **画面の「灰」が意味不明** | 表示を **「不明」** に統一（画面・CLI・README） |
 | 7 | 低 | **JS と Python の判定一致を機械検証していない** | `tests/test_parity.py` を追加（同じ索引・同じ入力で突き合わせ。Node が無い環境ではスキップ） |
+| 8 | 中 | **Python の `sitehealth.py` が CLI に未接続**（テストのみ） | **`svc-sitehealth` を追加**（`--html` / `--text` / `--index` / `--json`）。拡張と同じ解析を CLI からも使える |
+| 9 | 中 | **Python 側は `ranges` を持たない**（`report.py` は 1 範囲のみ） | **`Advisory.ranges` を追加**し、HTML レポートも「A / B / C」で並べる（`test_parity` でも一致を検証） |
+| 10 | 低 | **`readHeaders` が管理画面でも HEAD を送る** | `isAdminUrl`（`patterns.js`）を追加し、`wp-admin` / `wp-login.php` では送らない |
 
 ## 1. 残っている問題（未対応・推奨）
 
 | # | 重大度 | 内容 | 推奨 |
 |---|---|---|---|
-| 8 | 中 | **Python の `sitehealth.py` が CLI に未接続**（テストのみ）。拡張だけがサイトヘルスを使える | `svc-report`/`svc-survey` からも使えるようにするか、「拡張専用」と明記 |
-| 9 | 中 | **Python 側は `ranges` を持たない**（`report.py` は 1 範囲のみ）。拡張と表示が揃わない | `Advisory` に `ranges` を追加して同じ表示に |
-| 10 | 低 | **`readHeaders` が管理画面でも HEAD を送る**（wp-admin で無駄な通信） | `wp-admin` を除外 |
 | 11 | 低 | **`entered` のフォールバックは JS のみ**（Python に無い） | 仕様として統一するか、拡張専用と明記 |
 | 12 | 低 | **索引 3 MB を `chrome.storage.local` に保存**（上限 10 MB）。対象を増やすと圧迫 | `unlimitedStorage` を要求するか、`url` など導出可能なフィールドを削る |
 | 13 | 低 | **5 分以内の連打では更新されない**（意図した設計）が、画面に説明がない | 「最終確認: HH:MM」を出す |

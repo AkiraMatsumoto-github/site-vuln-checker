@@ -210,11 +210,30 @@ src/site_vuln_checker/         索引を作る側（Python 3.14 / uv）
   enrich.py                    悪用実績（KEV）・悪用確率（EPSS）の付与
   detect.py / advisories.py    判定ロジック（拡張の JavaScript と同じ仕様）
   survey.py / report.py        外部判定の実測と HTML レポート
+  sitehealth.py                サイトヘルス（管理者向け画面）の読み取り（svc-sitehealth）
 tests/                         テスト用のデータ（**Python と JavaScript で共用**）
 ```
 
+### サイトヘルスの写しを CLI で見る（任意）
+
+拡張と同じ解析を Python 側でも使えます（`svc-sitehealth`）。サイトヘルスの画面を
+保存するか「情報をクリップボードにコピー」したテキストを渡すと、**外部からは分からない PHP の Version**
+まで含めて判定します。
+
+```powershell
+# コピーしたテキストから構成を表示
+uv run svc-sitehealth --text site-health.txt
+
+# 索引を渡すと判定まで出す（拡張と同じ結果になります）
+uv run svc-sitehealth --text site-health.txt --index out/advisories.json
+
+# 機械処理用（拡張と同じ項目名の JSON）
+uv run svc-sitehealth --html site-health.html --json
+```
+
 判定ロジックは Python と JavaScript の**二重実装**ですが、**同じテストデータで同じ結果**になることを
-固定しています（Python 95 件 / JavaScript 20 件）。
+固定しています（Python 128 件 / JavaScript 45 件）。とくに `tests/test_parity.py` は、**同じ索引・同じ入力を
+両方に通して `level` / `action` / `note` / 影響する Version が一致するか**を機械的に突き合わせます。
 
 ## インストール
 

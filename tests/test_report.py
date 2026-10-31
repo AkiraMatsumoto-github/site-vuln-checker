@@ -51,6 +51,21 @@ def _payload_with_judgement() -> dict:
     }
 
 
+def test_render_shows_all_ranges_of_same_cve() -> None:
+    """同じ CVE の影響範囲が複数あるときは全部並べる（拡張の画面と同じ。レビュー #9）。"""
+    payload = _payload_with_judgement()
+    payload["sites"][0]["judgements"][0]["advisories"] = [
+        {
+            "id": "CVE-2026-109618",
+            "cvss": 9.2,
+            "ranges": ["7.3.0 〜 8.2.35 未満", "8.3.0 〜 8.4.1 未満"],
+        }
+    ]
+
+    html_text = render(payload)
+    assert "7.3.0 〜 8.2.35 未満 / 8.3.0 〜 8.4.1 未満が影響" in html_text
+
+
 def test_render_includes_judgement_section() -> None:
     html_text = render(_payload_with_judgement())
     assert "更新すべきもの（判定）" in html_text

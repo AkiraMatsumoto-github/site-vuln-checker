@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import re
 from bisect import bisect_left
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .detect import Analysis, Finding
@@ -35,6 +35,7 @@ from .versioning import compare_versions, version_key
 
 __all__ = [
     "LEVEL_GRAY",
+    "LEVEL_INFO",
     "LEVEL_NONE",
     "LEVEL_RED",
     "LEVEL_YELLOW",
@@ -43,6 +44,7 @@ __all__ = [
     "Judgement",
     "compare_versions",
     "judge",
+    "range_text",
     "summarize",
     "version_key",
 ]
@@ -75,6 +77,22 @@ def normalize_slug(text: str) -> str:
 
 #: 前方一致で拾うための最小長。短すぎる slug（"seo" など）は誤爆するので対象外。
 MIN_PREFIX_MATCH = 6
+
+
+def range_text(advisory: Advisory) -> str | None:
+    """勧告の「影響する Version」を文章にする（拡張の affectedRangeText と同じ）。"""
+    lower = advisory.affected_at_or_above
+    if advisory.affected_below:
+        if lower:
+            return f"{lower} 〜 {advisory.affected_below} 未満"
+        return f"{advisory.affected_below} より前"
+    if advisory.affected_upto:
+        if lower:
+            return f"{lower} 〜 {advisory.affected_upto} 以下"
+        return f"{advisory.affected_upto} 以下"
+    if lower:
+        return f"{lower} 以降"
+    return None
 
 
 def is_affected(version: str, advisory: Advisory) -> bool:
@@ -115,6 +133,8 @@ class Advisory:
     affected_below: str | None = None
     affected_upto: str | None = None
     affected_at_or_above: str | None = None
+    #: 同じ CVE が系統ごとに複数ある場合の「影響する Version」一覧（表示用）
+    ranges: tuple[str, ...] = ()
     fixed: str | None = None
     cvss: float | None = None
     kev: bool = False
@@ -156,6 +176,7 @@ class Advisory:
             affected_below=data.get("affected_below"),
             affected_upto=data.get("affected_upto"),
             affected_at_or_above=data.get("affected_at_or_above"),
+            ranges=tuple(str(item) for item in (data.get("ranges") or ())),
             fixed=data.get("fixed"),
             cvss=float(data["cvss"]) if data.get("cvss") is not None else None,
             kev=bool(data.get("kev") or False),
@@ -177,6 +198,7 @@ class Advisory:
             "affected_below": self.affected_below,
             "affected_upto": self.affected_upto,
             "affected_at_or_above": self.affected_at_or_above,
+            "ranges": list(self.ranges),
             "fixed": self.fixed,
             "cvss": self.cvss,
             "kev": self.kev,
@@ -329,15 +351,22 @@ def _level_for(affected: list[Advisory]) -> str:
 
 
 def _unique_by_id(advisories: list[Advisory]) -> tuple[Advisory, ...]:
-    """同じ CVE を 1 つにまとめる。
+    """同じ CVE を 1 つにまとめる（**範囲は落とさない**）。
 
     CPE 由来の勧告は**系統ごとに別レコード**になる（PHP なら 8.2/8.3/8.4/8.5）。
-    画面に同じ CVE を何行も出さないよう、ID で重複を除く。
+    1 つだけ残すと、自分の Version が該当するかを判断できないため、
+    複数あるときは ``ranges`` に全部持たせる。
     """
-    seen: dict[str, Advisory] = {}
+    groups: dict[str, list[Advisory]] = {}
     for advisory in advisories:
-        seen.setdefault(advisory.id, advisory)
-    return tuple(seen.values())
+        groups.setdefault(advisory.id, []).append(advisory)
+
+    merged: list[Advisory] = []
+    for group in groups.values():
+        first = group[0]
+        ranges = tuple(dict.fromkeys(t for t in (range_text(a) for a in group) if t))
+        merged.append(replace(first, ranges=ranges) if len(ranges) > 1 else first)
+    return tuple(merged)
 
 
 def _risk_reason(affected: list[Advisory]) -> str:

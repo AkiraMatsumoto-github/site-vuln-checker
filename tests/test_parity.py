@@ -41,6 +41,16 @@ INDEX = {
             "kev": True,
         },
         {
+            "id": "CVE-2026-109618",
+            "name": "PHP",
+            "slug": "php",
+            "affected_at_or_above": "7.4.0",
+            "affected_below": "8.1.30",
+            "fixed": "8.1.30",
+            "cvss": 9.2,
+            "kev": True,
+        },
+        {
             "id": "CVE-2025-90001",
             "name": "Contact Form 7",
             "slug": "contact-form-7",
@@ -106,7 +116,10 @@ def _python_results(case: list[dict]) -> list[dict]:
             "level": judgement.level,
             "action": judgement.action,
             "note": judgement.note,
-            "advisories": [a.id for a in judgement.advisories],
+            "advisories": [
+                {"id": advisory.id, "ranges": list(advisory.ranges)}
+                for advisory in judgement.advisories
+            ],
         }
         for judgement in judge(analysis, _load_index(), today)
     ]

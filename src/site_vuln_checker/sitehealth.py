@@ -12,12 +12,17 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import re
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from .detect import Finding
+from .advisories import Judgement
+from .detect import Analysis, Finding
 
 #: セクション見出しの対応表。**判定は上から順**（"wp-plugins-active" を "wp-core" より先に）。
 _SECTION_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -330,3 +335,127 @@ def parse_site_health(data: str) -> SiteHealthInfo:
     if "###" in data:
         return parse_site_health_text(data)
     return parse_site_health_html(data)
+
+
+#: 判定の表示（CLI）。拡張の画面と同じ並び・同じ言葉にする。
+_LEVEL_TEXT = {
+    "red": "赤",
+    "yellow": "黄",
+    "info": "情報",
+    "gray": "不明",
+    "none": "緑",
+}
+
+_COMPONENT_GROUPS = (
+    ("有効なプラグイン", "plugins_active"),
+    ("停止中のプラグイン", "plugins_inactive"),
+    ("使用中のテーマ", "themes_active"),
+    ("未使用のテーマ", "themes_inactive"),
+)
+
+
+def _read_health_file(path: Path) -> str:
+    """サイトヘルスの出力を読む（UTF-8 / BOM 付き可。日本語版の HTML も想定）。"""
+    return path.read_bytes().decode("utf-8-sig", errors="replace")
+
+
+def format_report(info: SiteHealthInfo, judgements: list[Judgement] | None = None) -> str:
+    """人が読む形（CLI の標準出力）にする。"""
+    source = "HTML" if info.source == "html" else "コピー用テキスト"
+    lines = [f"サイトヘルスから読み取りました（{source}）"]
+    if info.core_version:
+        lines.append(f"  WordPress {info.core_version}")
+    if info.php_version:
+        sapi = f"（{info.php_sapi}）" if info.php_sapi else ""
+        lines.append(f"  PHP {info.php_version}{sapi}")
+    if info.httpd:
+        lines.append(f"  サーバ {info.httpd}")
+    if info.database:
+        lines.append(f"  データベース {info.database}")
+    for label, attribute in _COMPONENT_GROUPS:
+        components: list[Component] = getattr(info, attribute)
+        if not components:
+            continue
+        lines.append(f"  {label}（{len(components)} 件）")
+        for component in components:
+            version = component.version or "Version 不明"
+            lines.append(f"    {component.name} {version}")
+
+    if judgements is not None:
+        lines.append("")
+        if not judgements:
+            lines.append("判定: 索引に該当する勧告はありません")
+        else:
+            lines.append("判定:")
+            for judgement in judgements:
+                label = _LEVEL_TEXT.get(judgement.level, judgement.level)
+                version = judgement.version or "Version 不明"
+                lines.append(
+                    f"  [{label}] {judgement.component} {version} ｜ {judgement.action}"
+                )
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``svc-sitehealth``: サイトヘルスの写しから構成を読み取り、索引があれば判定する。
+
+    例::
+
+        svc-sitehealth --html site-health.html --index out/index.json
+        svc-sitehealth --text site-health.txt
+        pbpaste | svc-sitehealth --index out/index.json
+    """
+    parser = argparse.ArgumentParser(
+        prog="svc-sitehealth",
+        description=(
+            "WordPress の「ツール → サイトヘルス → 情報」から構成を読み取る"
+            "（外部からは見えない PHP の Version なども分かる）"
+        ),
+    )
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument(
+        "--html", metavar="PATH", help="サイトヘルス画面の HTML（保存したファイル）"
+    )
+    source_group.add_argument(
+        "--text",
+        metavar="PATH",
+        help="「情報をクリップボードにコピー」したテキスト（ファイル）",
+    )
+    parser.add_argument(
+        "--index",
+        metavar="PATH",
+        help="勧告の索引（out/index.json など）。指定すると判定まで出す",
+    )
+    parser.add_argument("--json", action="store_true", help="JSON で出力する（機械処理用）")
+    args = parser.parse_args(argv)
+
+    if args.html:
+        info = parse_site_health_html(_read_health_file(Path(args.html)))
+    elif args.text:
+        info = parse_site_health_text(_read_health_file(Path(args.text)))
+    elif not sys.stdin.isatty():
+        info = parse_site_health(sys.stdin.read())
+    else:
+        parser.error("--html か --text を指定してください（標準入力からも読めます）")
+        return 2
+
+    judgements: list[Judgement] | None = None
+    if args.index:
+        from .advisories import AdvisoryIndex, judge
+
+        index = AdvisoryIndex.load(Path(args.index))
+        analysis = Analysis(url="site-health:", findings=info.to_findings())
+        judgements = list(judge(analysis, index))
+
+    if args.json:
+        payload: dict[str, object] = {"info": info.to_dict()}
+        if judgements is not None:
+            payload["judgements"] = [judgement.to_dict() for judgement in judgements]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(format_report(info, judgements))
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

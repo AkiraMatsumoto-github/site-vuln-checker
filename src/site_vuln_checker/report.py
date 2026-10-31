@@ -144,7 +144,8 @@ def _range_text(advisory: dict) -> str | None:
 def _advisory_line(advisory: dict) -> str:
     """`CVE-xxxx ｜ 1.4.2 以下が影響 ｜ 1.4.3 で修正 ｜ 深刻度 9.8` のような 1 行。"""
     parts = []
-    range_text = _range_text(advisory)
+    ranges = [str(item) for item in (advisory.get("ranges") or ()) if item]
+    range_text = " / ".join(ranges) if ranges else _range_text(advisory)
     parts.append(f"{_esc(range_text)}が影響" if range_text else "影響する Version は不明")
     fixed = advisory.get("fixed")
     # 修正版が範囲から自明（「X より前が影響」なら X が修正版）なときは繰り返さない

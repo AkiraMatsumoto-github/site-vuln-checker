@@ -18,7 +18,10 @@ const results = (input.cases ?? []).map((findings) =>
     level: judgement.level,
     action: judgement.action,
     note: judgement.note ?? "",
-    advisories: (judgement.advisories ?? []).map((advisory) => advisory.id),
+    advisories: (judgement.advisories ?? []).map((advisory) => ({
+      id: advisory.id,
+      ranges: advisory.ranges ?? [],
+    })),
   })),
 );
 

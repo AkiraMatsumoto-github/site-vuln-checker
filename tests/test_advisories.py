@@ -300,6 +300,23 @@ def test_same_cve_across_branches_is_shown_once() -> None:
     assert "報告はありません" in judgements[0].action
     assert "すべて修正済み" in judgements[0].note
     assert len(judgements[0].advisories) == 1, "同じ CVE は 1 行にまとめる"
+    # まとめても「影響する Version」は落とさない（系統ごとに全部見せる）
+    assert judgements[0].advisories[0].ranges == (
+        "6.0.9 より前",
+        "6.1.9 より前",
+        "6.2.9 より前",
+        "7.0.5 より前",
+    )
+
+
+def test_ranges_survive_round_trip() -> None:
+    """``ranges`` は索引 JSON に保存・復元できる（CLI の --json 出力用）。"""
+    advisory = Advisory(
+        id="CVE-X",
+        name="Foo",
+        ranges=("1.0.0 〜 1.2.0 未満", "1.3.0 〜 1.4.0 未満"),
+    )
+    assert Advisory.from_dict(advisory.to_dict()) == advisory
 
 
 def test_lower_bound_only_is_open_ended() -> None:

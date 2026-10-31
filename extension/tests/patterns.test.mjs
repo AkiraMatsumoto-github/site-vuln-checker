@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { INDEX_CANDIDATES, INDEX_ORIGINS, INDEX_TTL_MS, INDEX_URL, isIndexStale } from "../config.js";
-import { originPattern } from "../patterns.js";
+import { originPattern, isAdminUrl } from "../patterns.js";
 
 // Chrome のマッチパターンはポートを含められない（含めると一致しない）。
 test("ポートを落としてマッチパターンを作る", () => {
@@ -46,5 +46,22 @@ test("索引が無い・日時が壊れている場合は古いとみなす", ()
   assert.equal(isIndexStale(undefined), true);
   assert.equal(isIndexStale(null), true);
   assert.equal(isIndexStale("not-a-date"), true);
+});
+
+// --- 管理画面では HEAD を送らない（レビュー #10）------------------------------
+
+test("管理画面は HEAD を送らない対象とみなす", () => {
+  assert.equal(isAdminUrl("https://example.com/wp-admin/"), true);
+  assert.equal(isAdminUrl("https://example.com/wp-admin/options-general.php"), true);
+  assert.equal(isAdminUrl("https://example.com/wp-admin"), true);
+  assert.equal(isAdminUrl("https://example.com/wp-login.php"), true);
+  assert.equal(isAdminUrl("https://example.com:8443/wp-admin/site-health.php?tab=debug"), true);
+});
+
+test("公開ページは今までどおり HEAD を送る", () => {
+  assert.equal(isAdminUrl("https://example.com/"), false);
+  assert.equal(isAdminUrl("https://example.com/blog/wp-admin-guide/"), false);
+  assert.equal(isAdminUrl("https://example.com/?p=1"), false);
+  assert.equal(isAdminUrl("not a url"), false);
 });
 

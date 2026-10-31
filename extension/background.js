@@ -13,7 +13,7 @@
 import { AdvisoryIndex, judge, normalizeSlug, summarizeLevels } from "./advisor.js";
 import { INDEX_CANDIDATES, INDEX_ORIGINS, INDEX_REVALIDATE_MS, isIndexStale } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
-import { originPattern } from "./patterns.js";
+import { isAdminUrl, originPattern } from "./patterns.js";
 import { parseSiteHealth, siteHealthFindings } from "./sitehealth.js";
 
 const REPORT_KEY = "lastReport";
@@ -144,6 +144,10 @@ function collectEvidence() {
  * **HEAD で 1 回**だけ問い合わせる（本文は取得しない）。
  */
 async function readHeaders(url) {
+  // 管理画面（wp-admin / wp-login.php）では HEAD を送らない。
+  // ログイン画面へのリダイレクトが返るだけで、得られる情報が無い（レビュー #10）。
+  if (isAdminUrl(url)) return {};
+
   let pattern;
   try {
     pattern = originPattern(url);

@@ -8,3 +8,20 @@ export function originPattern(url) {
   const parsed = new URL(url);
   return `${parsed.protocol}//${parsed.hostname}/*`;
 }
+
+//: 管理画面（HEAD を送っても意味が無い）のパス。
+const ADMIN_PATH = /^\/wp-(?:admin|login)/i;
+
+/**
+ * 管理画面かどうか。
+ *
+ * `wp-admin` への HEAD はログイン画面へのリダイレクトが返るだけで、
+ * 得られる情報が無いのに**サーバへ余計な負荷**をかける（レビュー #10）。
+ */
+export function isAdminUrl(url) {
+  try {
+    return ADMIN_PATH.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
