@@ -4,7 +4,9 @@ Chrome ウェブストアに提出する画像・文章をここに置きます�
 
 ```
 store/
-  README.md             ← このファイル（撮り方と提出先）
+  README.md             ← このファイル（素材の説明）
+  SUBMIT.md             ← 提出の手順（チェックリスト・審査用メモ）
+  listing.md            ← ストア掲載文（短い説明 103 文字・詳細・権限の用途）
   screenshots/
     01-red.png                      元画像（1592×797）
     01-red-1280x800.png             ← ストア提出用（1280×800）
@@ -12,7 +14,6 @@ store/
     02-green-info-gray-1280x800.png ← ストア提出用（1280×800）
     03-site-health.png              元画像（1452×827）
     03-site-health-1280x800.png     ← ストア提出用（1280×800）
-  listing.md            ← 短い説明・詳細説明の最終稿（作成中）
 ```
 
 ## スクリーンショット（3 枚）
@@ -57,7 +58,7 @@ store/
 | 項目 | 場所 | 使うファイル・値 |
 | --- | --- | --- |
 | スクリーンショット | 「ストア掲載情報」→ スクリーンショット | `store/screenshots/01〜03-1280x800.png`（1〜5 枚） |
-| ストアアイコン | 同上（128×128） | `extension/icons/icon128.png` |
+| ストアアイコン | 同上（128×128） | `store/icon-128x128.png`（= `extension/icons/icon128.png` のコピー） |
 | 小さいプロモ画像（任意） | 同上（440×280） | 未作成（任意） |
 | プライバシーポリシー URL | 「プライバシー」タブ | `https://akiramatsumoto-github.github.io/site-vuln-checker/privacy.html` |
 | サポート URL | 「ストア掲載情報」 | `https://github.com/AkiraMatsumoto-github/site-vuln-checker/issues` |
@@ -73,7 +74,7 @@ Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $stage | Out-Null
 Copy-Item extension\* $stage -Recurse
 Remove-Item "$stage\tests", "$stage\README.md" -Recurse -Force
-Compress-Archive -Path "$stage\*" -DestinationPath svc-0.4.3.zip -Force
+Compress-Archive -Path "$stage\*" -DestinationPath svc-1.0.0.zip -Force
 ```
 
 - `extension\tests\` と `extension\README.md` は動かないので外しています（入れても審査は通ります）
@@ -81,6 +82,9 @@ Compress-Archive -Path "$stage\*" -DestinationPath svc-0.4.3.zip -Force
 - 版を上げたらファイル名も合わせる（`svc-1.0.0.zip` など）
 
 
-## 説明文の骨子
+## 掲載文と提出手順
 
-`docs/proposal.md` の 20.1 に下書きがあります（短い説明 132 文字以内＋詳細）。最終稿は `store/listing.md` に置きます。
+- **掲載文**（名前・短い説明・詳細説明・権限の用途・審査用メモ）: [`listing.md`](listing.md)
+- **提出の手順**（パッケージ作成 → 各フォームの入力 → 審査 → 公開後の運用）: [`SUBMIT.md`](SUBMIT.md)
+
+`docs/proposal.md` の 20.1 に元の下書きがあります（現行の UI に合わせて `listing.md` を正としています）。

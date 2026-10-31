@@ -405,6 +405,7 @@ setx NVD_API_KEY "取得したキー"     # 以後ずっと（新しいターミ
 <summary>Chrome Web Store ではいつ公開されますか？</summary>
 
 スクリーンショットと掲載文を用意して申請します（プライバシーポリシーとサポート窓口は用意済み）。
+手順は [store/SUBMIT.md](store/SUBMIT.md)、掲載文は [store/listing.md](store/listing.md) にあります。
 それまでは上の手順で使えます。
 </details>
 
