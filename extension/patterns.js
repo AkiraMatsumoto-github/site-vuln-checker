@@ -12,8 +12,10 @@ export function originPattern(url) {
 //: 管理画面（HEAD を送っても意味が無い）のパス。
 const ADMIN_PATH = /^\/wp-(?:admin|login)/i;
 
-//: 「ツール → サイトヘルス → 情報」の画面（ここだけ管理者の実測値を読める）。
-const SITE_HEALTH_PATH = /^\/wp-admin\/site-health\.php$/i;
+//: サイトヘルスの画面。**ディレクトリ名は問わない**（`/wp-admin/` を `/admin/` などに
+//: 変えているサイトがあるため）。`admin.php?page=site-health` 形式の実装も拾う。
+const SITE_HEALTH_PATH = /\/site-health\.php\/?$/i;
+const SITE_HEALTH_PAGE_SLUG = /^site-health$/i;
 
 /**
  * 管理画面かどうか。
@@ -30,15 +32,17 @@ export function isAdminUrl(url) {
 }
 
 /**
- * WordPress の「サイトヘルス → 情報」の画面か。
+ * WordPress の「サイトヘルス」の画面か（「情報」タブでなくてもよい）。
  *
- * この画面を開いているときだけ、**同じボタン**で実測値も読む。
- * 画面ごとにボタンを分けると「どちらを押すか」を利用者に考えさせるため、
- * 対象の URL で処理を振り分ける。
+ * サイトヘルスの情報は**同じページに全部入っている**（タブは表示の切り替えだけ）ので、
+ * `?tab=debug` かどうかは見ない。ディレクトリ名の変更（`/admin/site-health.php`）や
+ * サブディレクトリ設置（`/wp/site-health.php`）でも一致させる。
  */
 export function isSiteHealthUrl(url) {
   try {
-    return SITE_HEALTH_PATH.test(new URL(url).pathname);
+    const parsed = new URL(url);
+    if (SITE_HEALTH_PATH.test(parsed.pathname)) return true;
+    return SITE_HEALTH_PAGE_SLUG.test(parsed.searchParams.get("page") ?? "");
   } catch {
     return false;
   }

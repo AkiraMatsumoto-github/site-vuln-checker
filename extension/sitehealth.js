@@ -106,6 +106,31 @@ export function parseSiteHealth(sections) {
   return info;
 }
 
+/**
+ * サイトヘルスの「情報」の表が HTML に含まれているか（**URL に依存しない判定**）。
+ *
+ * WordPress は「状態」タブを開いていても情報タブの表を同じページに出力するので、
+ * URL が `site-health.php` でなくても（管理画面の外でも）中身があれば読める。
+ * ここは**取りこぼさない側**に倒し、実際に値が取れたかは `hasSiteHealthData` で見る。
+ */
+export function looksLikeSiteHealthHtml(html) {
+  const text = String(html ?? "");
+  if (/health-check/i.test(text)) return true;
+  return /wp-core/i.test(text) && /wp-server/i.test(text);
+}
+
+/** 読み取れた中身が実質空かどうか（空なら保存しない・警告も出さない）。 */
+export function hasSiteHealthData(info) {
+  if (!info) return false;
+  if (info.core || info.php || info.sapi || info.httpd || info.database) return true;
+  return (
+    info.pluginsActive.length > 0 ||
+    info.pluginsInactive.length > 0 ||
+    info.themesActive.length > 0 ||
+    info.themesInactive.length > 0
+  );
+}
+
 /** サイトヘルスの情報を検出結果（findings）へ変換する。 */
 export function siteHealthFindings(info) {
   const findings = [];

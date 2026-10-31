@@ -14,7 +14,7 @@ import { AdvisoryIndex, judge, normalizeSlug, summarizeLevels } from "./advisor.
 import { INDEX_CANDIDATES, INDEX_ORIGINS, INDEX_REVALIDATE_MS, isIndexStale } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
 import { isAdminUrl, isSiteHealthUrl, originPattern } from "./patterns.js";
-import { parseSiteHealth, siteHealthFindings } from "./sitehealth.js";
+import { parseSiteHealth, hasSiteHealthData, looksLikeSiteHealthHtml, siteHealthFindings } from "./sitehealth.js";
 
 const REPORT_KEY = "lastReport";
 const INDEX_KEY = "index";
@@ -192,16 +192,27 @@ async function inspectActiveTab() {
     return { needsSitePermission: true, origin: originOf(url) };
   }
 
-  // 「ツール → サイトヘルス → 情報」を開いていれば、同じ操作で実測値も読む。
-  // ボタンを分けず、**対象の URL で処理を振り分ける**（利用者に選ばせない）。
+  // サイトヘルスの画面なら、同じ操作で実測値も読む（ボタンは分けない）。
+  // 判定は URL だけでなく**ページの中身**でも行う:
+  //   - URL: `/wp-admin/` を `/admin/` に変えていても `site-health.php` なら拾う
+  //   - 中身: 「状態」タブのままでも情報の表は同じページにあるため
+  const siteHealthUrl = isSiteHealthUrl(result.url ?? url);
+  const siteHealthPage = siteHealthUrl || looksLikeSiteHealthHtml(result.html);
+
   let siteHealthRead = null;
-  if (isSiteHealthUrl(result.url ?? url)) {
-    siteHealthRead = await readSiteHealth(tab).catch((error) => ({
+  if (siteHealthPage) {
+    const read = await readSiteHealth(tab).catch((error) => ({
       error: String(error?.message ?? error),
     }));
+    // 明示的にサイトヘルスを開いているときだけ「読めなかった」と伝える
+    // （本文に health-check とあるだけのページで警告を出さない）
+    const reportable = Boolean(read?.info) || siteHealthUrl;
+    siteHealthRead = reportable ? read : null;
   }
 
-  const headers = await readHeaders(result.url);
+  // サイトヘルスの画面では HEAD を送らない（値は画面から取れるうえ、
+  // 管理画面への HEAD はログイン画面へのリダイレクトしか返らない）
+  const headers = siteHealthPage ? {} : await readHeaders(result.url);
   const analysis = analyze({
     url: result.url,
     html: result.html,
@@ -425,15 +436,16 @@ function collectSiteHealth() {
 }
 
 /**
- * WordPress「ツール → サイトヘルス → 情報」を読む。
+ * WordPress「サイトヘルス」の画面から、表示されている値を読む。
  *
  * 管理者としてログインしている**本人のサイト**だけ。表示済みの DOM を読むだけで、
- * 追加のリクエストはしない（企画書 6.4）。
+ * 追加のリクエストはしない（企画書 6.4）。「情報」タブでなくても、表はページに
+ * 出力されているので読める。読めた中身が空なら保存しない。
  */
 async function readSiteHealth(tab) {
   const target = tab ?? (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
-  if (!target?.id || !isSiteHealthUrl(target.url)) {
-    return { error: "WordPress の「ツール → サイトヘルス → 情報」を開いてから実行してください" };
+  if (!target?.id) {
+    return { error: "タブが見つかりません" };
   }
 
   const injected = await chrome.scripting.executeScript({
@@ -441,14 +453,14 @@ async function readSiteHealth(tab) {
     func: collectSiteHealth,
   });
   const sections = injected?.[0]?.result;
-  if (!sections?.length) {
+
+  const info = parseSiteHealth(sections ?? []);
+  if (!hasSiteHealthData(info)) {
     return {
       error:
-        "サイトヘルスの表を読み取れませんでした（「情報」タブを開いてから、もう一度お試しください）",
+        "サイトヘルスの表を読み取れませんでした（ページを再読み込みしてから、もう一度お試しください）",
     };
   }
-
-  const info = parseSiteHealth(sections);
   const origin = originOf(target.url);
   const record = { ...info, readAt: new Date().toISOString() };
   if (origin) {

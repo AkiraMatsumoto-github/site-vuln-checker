@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseSiteHealth, siteHealthFindings } from "../sitehealth.js";
+import { hasSiteHealthData, looksLikeSiteHealthHtml, parseSiteHealth, siteHealthFindings } from "../sitehealth.js";
 
 // tests/fixtures/site_health.html と同じ内容を、DOM から取り出した形で用意する
 const SECTIONS = [
@@ -82,3 +82,28 @@ test("空の入力でも落ちない", () => {
   assert.equal(info.php, null);
   assert.deepEqual(siteHealthFindings(info), []);
 });
+
+// --- URL に依存しない判定（「情報」タブでなくても表はある）------------------------
+
+test("サイトヘルスの表がある HTML を見分ける", () => {
+  // 実ページ（health-check-body の中に wp-core / wp-server の表がある）
+  assert.equal(
+    looksLikeSiteHealthHtml('<div class="health-check-body"><h2>wp-core</h2></div>'),
+    true,
+  );
+  // クラス名が変わっても、見出しが揃っていれば拾う
+  assert.equal(looksLikeSiteHealthHtml("<h2>wp-core</h2><h2>wp-server</h2>"), true);
+  // 片方だけ・無関係なページは拾わない
+  assert.equal(looksLikeSiteHealthHtml("<h2>wp-core</h2>"), false);
+  assert.equal(looksLikeSiteHealthHtml("<html><body>ただのページ</body></html>"), false);
+  assert.equal(looksLikeSiteHealthHtml(""), false);
+});
+
+test("中身が空なら「読めた」とみなさない（保存しない）", () => {
+  assert.equal(hasSiteHealthData(parseSiteHealth([])), false);
+  assert.equal(hasSiteHealthData(null), false);
+  assert.equal(hasSiteHealthData(parseSiteHealth(SECTIONS)), true);
+  // 管理画面の一覧表などを誤って読んだ場合（知らない見出しだけ）
+  assert.equal(hasSiteHealthData(parseSiteHealth([{ id: "投稿一覧", rows: [["a", "b"]] }])), false);
+});
+

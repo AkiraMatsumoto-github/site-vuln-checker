@@ -48,19 +48,31 @@ test("索引が無い・日時が壊れている場合は古いとみなす", ()
   assert.equal(isIndexStale("not-a-date"), true);
 });
 
-// --- サイトヘルス（URL で自動的に振り分ける）-------------------------------
+// --- サイトヘルス（URL と中身で自動的に振り分ける）----------------------------
 
-test("サイトヘルスの画面だけ実測値を読む対象にする", () => {
+test("サイトヘルスの画面は「情報」タブでなくても対象にする", () => {
   assert.equal(isSiteHealthUrl("https://example.com/wp-admin/site-health.php"), true);
+  assert.equal(isSiteHealthUrl("https://example.com/wp-admin/site-health.php?tab=status"), true);
   assert.equal(isSiteHealthUrl("https://example.com/wp-admin/site-health.php?tab=debug"), true);
   assert.equal(isSiteHealthUrl("https://example.com:8443/wp-admin/site-health.php"), true);
 });
 
+test("管理画面のディレクトリ名を変えていても対象にする", () => {
+  // /wp-admin/ を /admin/ や /wp/wp-admin/ に変えているサイト
+  assert.equal(isSiteHealthUrl("https://example.com/admin/site-health.php"), true);
+  assert.equal(isSiteHealthUrl("https://example.com/wp/wp-admin/site-health.php"), true);
+  assert.equal(isSiteHealthUrl("https://example.com/manage/site-health.php?tab=debug"), true);
+  // プラグイン形式（admin.php?page=site-health）
+  assert.equal(isSiteHealthUrl("https://example.com/wp-admin/admin.php?page=site-health"), true);
+});
+
 test("サイトヘルス以外の管理画面は対象にしない", () => {
   assert.equal(isSiteHealthUrl("https://example.com/wp-admin/"), false);
+  assert.equal(isSiteHealthUrl("https://example.com/admin/"), false);
   assert.equal(isSiteHealthUrl("https://example.com/wp-admin/options-general.php"), false);
   assert.equal(isSiteHealthUrl("https://example.com/"), false);
-  assert.equal(isSiteHealthUrl("https://example.com/blog/site-health.php"), false);
+  assert.equal(isSiteHealthUrl("https://example.com/blog/site-health.php"), true, "任意の場所の site-health.php");
+  assert.equal(isSiteHealthUrl("https://example.com/wp-admin/site-health.php.bak"), false);
   assert.equal(isSiteHealthUrl("not a url"), false);
 });
 
