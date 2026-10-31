@@ -119,6 +119,50 @@ def test_403_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
         client.close()
 
 
+def test_timeout_is_retried_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """読み取りタイムアウトは 1 回だけ再試行する（2026-10-31 の索引更新失敗への対策）。"""
+    import httpx
+
+    client = nvd.NvdClient(api_key="secret")
+    calls: list[int] = []
+    payload = {"totalResults": 0, "vulnerabilities": []}
+
+    def fake_get(url: str, params: dict | None = None, headers: dict | None = None):
+        calls.append(1)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("The read operation timed out")
+        return _FakeResponse(payload)
+
+    monkeypatch.setattr(client._client, "get", fake_get)  # type: ignore[arg-type]
+    monkeypatch.setattr(nvd.time, "sleep", lambda _seconds: None)
+    try:
+        assert client.search(keywordSearch="x") == payload
+        assert len(calls) == 2, "1 回目が失敗したら 1 回だけ再試行する"
+    finally:
+        client.close()
+
+
+def test_timeout_retries_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """連続タイムアウトは 2 回で止める（無限に待たない）。"""
+    import httpx
+
+    client = nvd.NvdClient(api_key="secret", max_retries=3)
+    calls: list[int] = []
+
+    def fake_get(url: str, params: dict | None = None, headers: dict | None = None):
+        calls.append(1)
+        raise httpx.ReadTimeout("The read operation timed out")
+
+    monkeypatch.setattr(client._client, "get", fake_get)  # type: ignore[arg-type]
+    monkeypatch.setattr(nvd.time, "sleep", lambda _seconds: None)
+    try:
+        with pytest.raises(RuntimeError, match="タイムアウト"):
+            client.search(keywordSearch="x")
+        assert len(calls) == 2, "タイムアウトの再試行は 1 回だけ"
+    finally:
+        client.close()
+
+
 def test_page_size_is_capped(monkeypatch: pytest.MonkeyPatch) -> None:
     client = nvd.NvdClient(api_key="secret")
     try:

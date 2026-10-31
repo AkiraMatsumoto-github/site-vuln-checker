@@ -67,6 +67,9 @@ class NvdClient:
     api_key: str | None = None
     timeout: float = 30.0
     max_retries: int = 3
+    #: タイムアウト（``ReadTimeout`` など）だけは**1 回**まで再試行する。
+    #: NVD 側の一時的な遅延で起きるため（2026-10-31 に実際に発生）。
+    timeout_retries: int = 1
     _last_request: float = field(default=0.0, repr=False)
     _client: httpx.Client | None = field(default=None, repr=False)
 
@@ -115,11 +118,25 @@ class NvdClient:
             params["resultsPerPage"] = MAX_PAGE_SIZE
 
         last_error = ""
+        timeouts = 0
         for attempt in range(1, self.max_retries + 1):
             self._wait()
             try:
                 response = self._client.get(BASE_URL, params=params, headers=headers)
-            finally:
+            except httpx.TimeoutException as exc:
+                # 読み取りタイムアウトは NVD 側の一時的な遅延で起きる。
+                # 429/5xx と違って**待っても直らないことがある**ので、回数は 1 回に絞る。
+                self._last_request = time.monotonic()
+                timeouts += 1
+                if timeouts > self.timeout_retries:
+                    raise RuntimeError(
+                        f"NVD API がタイムアウトしました（{type(exc).__name__}）。"
+                        "時間をおいて再実行してください"
+                    ) from exc
+                last_error = f"タイムアウト（{type(exc).__name__}）"
+                time.sleep(min(30.0, 3.0 * attempt))
+                continue
+            else:
                 self._last_request = time.monotonic()
 
             if response.status_code == 403:
