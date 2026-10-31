@@ -81,12 +81,12 @@ function judgementItem(judgement, level) {
   return item;
 }
 
-//: 信号の並び（赤 → 黄 → 緑 → 灰）。空の枠も出して「全体像」が見えるようにする。
-const LEVEL_SECTIONS = ["red", "yellow", "none", "gray"];
+//: 信号の並び（赤 → 黄 → 緑 → 情報 → 不明）。空の枠も出して「全体像」が見えるようにする。
+const LEVEL_SECTIONS = ["red", "yellow", "none", "info", "gray"];
 
 function renderJudgements(report) {
   const judgements = report.judgements ?? [];
-  const groups = { red: [], yellow: [], none: [], gray: [] };
+  const groups = { red: [], yellow: [], none: [], info: [], gray: [] };
   for (const judgement of judgements) {
     const level = groups[judgement.level] ? judgement.level : "none";
     groups[level].push(judgement);

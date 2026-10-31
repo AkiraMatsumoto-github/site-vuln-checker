@@ -521,7 +521,7 @@ async function refreshIndex(urlOverride) {
   return { count: index.size, generatedAt: index.generatedAt, url, notModified: false };
 }
 
-/** 最も重い判定をバッジに出す（赤 > 黄 > 灰）。 */
+/** 最も重い判定をバッジに出す（赤 > 黄 > 不明）。 */
 async function updateBadge(report) {
   const levels = report.levels ?? {};
   let text = "";

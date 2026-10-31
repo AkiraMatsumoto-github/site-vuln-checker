@@ -318,7 +318,7 @@ export function buildNotes(findings) {
     .filter((item) => item.kind === "plugin" && !item.version)
     .map((item) => item.name);
   if (unknown.length) {
-    notes.push(`バージョンが分からないプラグイン: ${unknown.join(", ")}（灰判定になります）`);
+    notes.push(`バージョンが分からないプラグイン: ${unknown.join(", ")}（不明として表示します）`);
   }
 
   // PHP の話は PHP 製のサイトだけにする（静的サイトに「PHP 不明」は無意味）

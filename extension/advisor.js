@@ -5,7 +5,7 @@
 //   1. 影響範囲に入るか（affected_below / affected_upto）
 //   2. 入っていれば KEV / CVSS / EPSS で赤・黄を決める
 
-export const LEVEL = { RED: "red", YELLOW: "yellow", GRAY: "gray", NONE: "none" };
+export const LEVEL = { RED: "red", YELLOW: "yellow", INFO: "info", GRAY: "gray", NONE: "none" };
 export const RED_CVSS = 9.0;
 export const RED_EPSS = 0.5;
 /** 前方一致で拾うための最小長（短すぎる slug は誤爆する）。 */
@@ -75,7 +75,7 @@ function lowerBound(sorted, value) {
   return low;
 }
 
-const LEVEL_ORDER = { red: 0, yellow: 1, gray: 2, none: 3 };
+const LEVEL_ORDER = { red: 0, yellow: 1, info: 2, gray: 3, none: 4 };
 
 function levelFor(affected) {
   if (affected.some((advisory) => advisory.kev)) return LEVEL.RED;
@@ -166,7 +166,7 @@ function judgeAdvisories(component, index) {
   const advisories = index ? index.advisoriesFor(component) : [];
 
   if (!component.version) {
-    // 版が分からない = 判定不能。勧告の履歴があるものだけ灰で知らせる。
+    // 版が分からない = 判定不能。勧告の履歴があるものだけ不明で知らせる。
     if (!advisories.length) return null;
     const unique = uniqueById(advisories);
     return {
@@ -231,7 +231,9 @@ function judgeLifecycle(component, lifecycles, today) {
       : "サポート終了が近づいています。サポート中の系統へ更新してください";
     level = LEVEL.YELLOW;
   } else {
+    // outdated（同じ系に新しい版がある）はリスクではないので「情報」
     action = `同じ ${status.cycle} 系の最新は ${status.latest} です`;
+    level = LEVEL.INFO;
   }
 
   return {
@@ -320,7 +322,7 @@ export function judge(analysis, index, today = new Date()) {
 
 
 export function summarizeLevels(judgements) {
-  const counts = { red: 0, yellow: 0, gray: 0, none: 0 };
+  const counts = { red: 0, yellow: 0, info: 0, gray: 0, none: 0 };
   for (const judgement of judgements) {
     counts[judgement.level] = (counts[judgement.level] || 0) + 1;
   }

@@ -4,7 +4,7 @@
 
 - **索引（JSON）を作る**のは取り込み側（NVD / OSV など）。ここは**照合と判定**だけを行う。
 - 判定は 2 軸（docs/proposal.md 7.1）。軸A=勧告の有無、軸B=「修正版があるか」。
-- **バージョンが分からないものは灰**。推測で埋めない（7.6 の鉄則）。
+- **バージョンが分からないものは不明**。推測で埋めない（7.6 の鉄則）。
 
 索引の形式::
 
@@ -49,10 +49,17 @@ __all__ = [
 
 LEVEL_RED = "red"
 LEVEL_YELLOW = "yellow"
+LEVEL_INFO = "info"
 LEVEL_GRAY = "gray"
 LEVEL_NONE = "none"
 
-LEVEL_ORDER = {LEVEL_RED: 0, LEVEL_YELLOW: 1, LEVEL_GRAY: 2, LEVEL_NONE: 3}
+LEVEL_ORDER = {
+    LEVEL_RED: 0,
+    LEVEL_YELLOW: 1,
+    LEVEL_INFO: 2,
+    LEVEL_GRAY: 3,
+    LEVEL_NONE: 4,
+}
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -293,7 +300,7 @@ class Judgement:
 
     @property
     def is_issue(self) -> bool:
-        """「更新すべきもの」に出すか（灰は出すが、赤黄とは別扱い）。"""
+        """「更新すべきもの」に出すか（不明は出すが、赤黄とは別扱い）。"""
         return self.level in (LEVEL_RED, LEVEL_YELLOW)
 
     def to_dict(self) -> dict[str, object]:
@@ -353,7 +360,7 @@ def _judge_advisories(finding: Finding, index: AdvisoryIndex) -> Judgement | Non
     advisories = index.advisories_for(finding)
 
     if finding.version is None:
-        # 版が分からない = 判定不能。ただし「勧告の履歴がある」ものだけ灰で知らせる。
+        # 版が分からない = 判定不能。ただし「勧告の履歴がある」ものだけ不明で知らせる。
         if not advisories:
             return None
         unique = _unique_by_id(advisories)
@@ -440,9 +447,9 @@ def _judge_lifecycle(
             else "サポート終了が近づいています。サポート中の系統へ更新してください"
         )
         level = LEVEL_YELLOW
-    else:  # outdated
+    else:  # outdated（同じ系に新しい版がある）
         action = f"同じ {status.cycle} 系の最新は {status.latest} です"
-        level = LEVEL_NONE
+        level = LEVEL_INFO  # リスクではないので「情報」
 
     return Judgement(
         component=finding.name,
@@ -510,7 +517,13 @@ def _merge(left: Judgement, right: Judgement) -> Judgement:
 
 def summarize(judgements: list[Judgement]) -> dict[str, int]:
     """判定の件数（レポートとテストで使う）。"""
-    counts = {LEVEL_RED: 0, LEVEL_YELLOW: 0, LEVEL_GRAY: 0, LEVEL_NONE: 0}
+    counts = {
+        LEVEL_RED: 0,
+        LEVEL_YELLOW: 0,
+        LEVEL_INFO: 0,
+        LEVEL_GRAY: 0,
+        LEVEL_NONE: 0,
+    }
     for judgement in judgements:
         counts[judgement.level] += 1
     return counts

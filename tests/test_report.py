@@ -1,6 +1,6 @@
 """レポート描画（report）のテスト。
 
-判定（赤/黄/灰）が HTML に出ること・索引が無いときに空節を出さないことを固定する。
+判定（赤/黄/不明）が HTML に出ること・索引が無いときに空節を出さないことを固定する。
 """
 
 from site_vuln_checker.report import render

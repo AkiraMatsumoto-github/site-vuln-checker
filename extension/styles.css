@@ -177,7 +177,16 @@ button:disabled {
   background: var(--green);
 }
 
-/* 灰（判定できない） */
+/* 情報（リスクなし・参考） */
+.light.info .light-head {
+  border-left-color: #2b6cb0;
+  background: #f0f6ff;
+}
+.light.info .lamp {
+  background: #2b6cb0;
+}
+
+/* 不明（判定できない） */
 .light.gray .light-head {
   border-left-color: var(--gray);
   background: #f7f7f7;

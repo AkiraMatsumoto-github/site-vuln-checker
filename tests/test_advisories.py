@@ -11,6 +11,7 @@ import pytest
 
 from site_vuln_checker.advisories import (
     LEVEL_GRAY,
+    LEVEL_INFO,
     LEVEL_NONE,
     LEVEL_RED,
     LEVEL_YELLOW,
@@ -93,7 +94,7 @@ def test_unknown_version_is_gray_not_green() -> None:
     assert judgements[0].level == LEVEL_GRAY
     assert judgements[0].version is None
     assert "Version が不明なため判定できません" in judgements[0].note
-    assert judgements[0].is_issue is False, "灰は「更新すべきもの」とは別枠"
+    assert judgements[0].is_issue is False, "不明は「更新すべきもの」とは別枠"
 
 
 def test_unknown_version_without_history_is_skipped() -> None:
@@ -108,6 +109,7 @@ def test_order_and_summary() -> None:
     assert summarize(judgements) == {
         LEVEL_RED: 1,
         LEVEL_YELLOW: 0,
+        LEVEL_INFO: 0,
         LEVEL_GRAY: 0,
         LEVEL_NONE: 1,
     }
@@ -309,7 +311,7 @@ def test_lower_bound_only_is_open_ended() -> None:
 
 
 
-def test_eol_only_is_yellow_and_outdated_is_none() -> None:
+def test_eol_only_is_yellow_and_outdated_is_info() -> None:
     """EOL は黄（更新すべき）、同一枝のパッチ遅れは「—」（情報のみ）。"""
     lifecycles = LifecycleIndex(
         products={
@@ -338,7 +340,7 @@ def test_eol_only_is_yellow_and_outdated_is_none() -> None:
         index,
         today=date(2026, 10, 29),
     )
-    assert [j.level for j in outdated] == [LEVEL_NONE]
+    assert [j.level for j in outdated] == [LEVEL_INFO]
     assert "8.4.27" in outdated[0].action
 
 

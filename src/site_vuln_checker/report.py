@@ -85,7 +85,7 @@ def _rows(findings: list[dict]) -> str:
         elif version:
             version_cell = _esc(version)
         else:
-            version_cell = '<span class="empty">版不明（灰）</span>'
+            version_cell = '<span class="empty">Version 不明</span>'
         evidence = "<br>".join(f"<code>{_esc(e)}</code>" for e in f.get("evidence", []))
         active = f.get("active")
         badge = ""
@@ -121,7 +121,8 @@ def _section(title: str, findings: list[dict]) -> str:
 _LEVEL_LABELS = {
     "red": ("🔴 赤", "#c53030"),
     "yellow": ("🟡 黄", "#b7791f"),
-    "gray": ("⚪ 灰", "#718096"),
+    "info": ("🔵 情報", "#2b6cb0"),
+    "gray": ("⚪ 不明", "#718096"),
     "none": ("—", "#2f855a"),
 }
 
@@ -161,7 +162,7 @@ def _advisory_line(advisory: dict) -> str:
 
 
 def _judgement_rows(judgements: list[dict]) -> str:
-    """赤/黄/灰の判定を表にする。"""
+    """赤/黄/不明の判定を表にする。"""
     rows = []
     for judgement in judgements:
         label, color = _LEVEL_LABELS.get(str(judgement.get("level")), ("?", "#555"))
@@ -264,7 +265,8 @@ def render(payload: dict) -> str:
         level_kpis = [
             _kpi(str(levels.get("red", 0)), "赤（要対応）"),
             _kpi(str(levels.get("yellow", 0)), "黄（更新推奨）"),
-            _kpi(str(levels.get("gray", 0)), "灰（判定不能）"),
+            _kpi(str(levels.get("info", 0)), "情報（参考）"),
+            _kpi(str(levels.get("gray", 0)), "不明（判定不能）"),
         ]
         notice = ""
     else:
@@ -272,7 +274,7 @@ def render(payload: dict) -> str:
         level_kpis = [
             _kpi("—", "赤（未判定）"),
             _kpi("—", "黄（未判定）"),
-            _kpi("—", "灰（未判定）"),
+            _kpi("—", "不明（未判定）"),
         ]
         notice = (
             '<div class="notes"><b>脆弱性の判定はしていません</b>（勧告索引が未適用）。'
@@ -316,7 +318,7 @@ def render(payload: dict) -> str:
 <footer>
   生成: site-vuln-checker（サイト脆弱性チェッカー PoC） /
   この PoC は外部から何が分かるかの実測用です。
-  「版不明（灰）」は判定不能を意味し、安全を意味しません。
+  「Version 不明」は判定不能を意味し、安全を意味しません。
 </footer>
 </body>
 </html>

@@ -153,12 +153,12 @@ test("入力された Version は、該当情報が無くても必ず表示す�
     },
   ];
   const judgements = judge({ findings }, index);
-  assert.equal(judgements.length, 1, "無反応に見えないよう灰で出す");
+  assert.equal(judgements.length, 1, "無反応に見えないよう不明で出す");
   assert.equal(judgements[0].level, LEVEL.GRAY);
   assert.match(judgements[0].note, /索引/);
 });
 
-test("版が不明なら灰（緑にしない）", () => {
+test("版が不明なら不明（緑にしない）", () => {
   const judgements = judge(analysis([plugin("elementor", null)]), AdvisoryIndex.fromJSON(INDEX));
   assert.equal(judgements[0].level, LEVEL.GRAY);
   assert.match(judgements[0].note, /Version が不明なため判定できません/);
@@ -211,7 +211,7 @@ test("内訳の集計", () => {
     ]),
     index,
   );
-  assert.deepEqual(summarizeLevels(judgements), { red: 1, yellow: 1, gray: 1, none: 0 });
+  assert.deepEqual(summarizeLevels(judgements), { red: 1, yellow: 1, info: 0, gray: 1, none: 0 });
 });
 
 // --- CPE の下限つき範囲とライフサイクル（EOL）---------------------------------
@@ -298,7 +298,7 @@ test("EOL だけなら黄、同一系統のパッチ遅れは「—」", () => {
   const outdated = judge(analysis([language("php", "8.4.20")]), index, TODAY);
   assert.deepEqual(
     outdated.map((item) => item.level),
-    [LEVEL.NONE],
+    [LEVEL.INFO],
   );
   assert.match(outdated[0].action, /8\.4\.27/);
 

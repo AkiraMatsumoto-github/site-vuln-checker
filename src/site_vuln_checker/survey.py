@@ -93,7 +93,7 @@ class Survey:
         }
 
     def level_counts(self) -> dict[str, int]:
-        """判定の内訳（赤/黄/灰/該当なし）。索引を渡していなければ全て 0。"""
+        """判定の内訳（赤/黄/不明/該当なし）。索引を渡していなければ全て 0。"""
         all_judgements = [j for result in self.results for j in result.judgements]
         return summarize(all_judgements)
 
@@ -206,7 +206,7 @@ def print_summary(summary: dict[str, object]) -> None:
     if any(levels.values()):
         print(
             f"判定: 赤 {levels.get('red', 0)} / 黄 {levels.get('yellow', 0)} / "
-            f"灰 {levels.get('gray', 0)} / 該当なし {levels.get('none', 0)}"
+            f"不明 {levels.get('gray', 0)} / 該当なし {levels.get('none', 0)}"
         )
     print("※ 企画書 8.1 の見込み値と比べる。件数が少ないので参考値として扱う")
 
@@ -225,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         "--advisories",
         type=Path,
         default=None,
-        help="勧告索引の JSON。指定すると赤/黄/灰の判定まで行う",
+        help="勧告索引の JSON。指定すると赤/黄/不明の判定まで行う",
     )
     args = parser.parse_args(argv)
 

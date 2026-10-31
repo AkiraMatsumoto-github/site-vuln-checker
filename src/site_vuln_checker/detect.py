@@ -313,7 +313,7 @@ def _detect_frameworks(html_lower: str) -> list[Finding]:
     """サーバ側フレームワークの推定（版はほぼ取れないので ``version=None``）。
 
     外部から見えるのは**フレームワークが出力する目印**だけ。版は分からないことが
-    多いため、確定できない場合は灰のままにする（拡張では手入力で補える）。
+    多いため、確定できない場合は不明のままにする（拡張では手入力で補える）。
     """
     signals: tuple[tuple[str, tuple[str, ...], float], ...] = (
         ("django", ("csrfmiddlewaretoken",), 0.6),
@@ -484,7 +484,7 @@ def analyze(url: str, html: str, headers: dict[str, str] | None = None) -> Analy
     unknown = [p.name for p in analysis.of_kind("plugin") if not p.version]
     if unknown:
         analysis.notes.append(
-            f"バージョンが分からないプラグイン: {', '.join(unknown)}（灰判定になります）"
+            f"バージョンが分からないプラグイン: {', '.join(unknown)}（不明として表示します）"
         )
 
     # PHP の話は PHP 製のサイトだけにする（静的サイトに「PHP 不明」は無意味）
