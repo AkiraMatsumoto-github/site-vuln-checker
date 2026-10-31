@@ -23,6 +23,15 @@ export const INDEX_ORIGINS = ["https://akiramatsumoto-github.github.io/*"];
 export const INDEX_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * 再確認の最短間隔。
+ *
+ * GitHub Pages は ETag を返すので、``If-None-Match`` で問い合わせると
+ * 変化が無ければ **304（本文なし）** で返る＝ほぼ通信ゼロ。
+ * これで「押すたびに最新を確認し、変わっていなければ何もしない」ができる。
+ */
+export const INDEX_REVALIDATE_MS = 5 * 60 * 1000;
+
+/**
  * 索引が古いか（取得し直すべきか）。
  *
  * @param {string|null|undefined} updatedAt 最後に取得した日時（ISO 文字列）

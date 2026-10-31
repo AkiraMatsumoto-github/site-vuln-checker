@@ -11,7 +11,7 @@
 // 方針（企画書 12.5）: 秘密（API キー）は持たない。通信は索引の取得だけ。
 
 import { AdvisoryIndex, judge, normalizeSlug, summarizeLevels } from "./advisor.js";
-import { INDEX_CANDIDATES, INDEX_ORIGINS, isIndexStale } from "./config.js";
+import { INDEX_CANDIDATES, INDEX_ORIGINS, INDEX_REVALIDATE_MS, isIndexStale } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
 import { originPattern } from "./patterns.js";
 import { parseSiteHealth, siteHealthFindings } from "./sitehealth.js";
@@ -19,6 +19,7 @@ import { parseSiteHealth, siteHealthFindings } from "./sitehealth.js";
 const REPORT_KEY = "lastReport";
 const INDEX_KEY = "index";
 const INDEX_URL_KEY = "indexUrl";
+const INDEX_ETAG_KEY = "indexEtag";
 const VERSIONS_KEY = "versions";
 const SITE_HEALTH_KEY = "siteHealth";
 const STATE_VERSION_KEY = "stateVersion";
@@ -47,7 +48,7 @@ async function migrateStorage(details) {
   const expected = INDEX_CANDIDATES[0];
   const staleSource = stored[INDEX_URL_KEY] && stored[INDEX_URL_KEY] !== expected;
   if (staleSource) {
-    await chrome.storage.local.remove([INDEX_KEY, INDEX_URL_KEY, "indexUpdatedAt"]);
+    await chrome.storage.local.remove([INDEX_KEY, INDEX_URL_KEY, INDEX_ETAG_KEY, "indexUpdatedAt"]);
   }
 
   const version = Number(stored[STATE_VERSION_KEY] ?? 0);
@@ -342,8 +343,8 @@ function applyVersions(analysis, versions) {
 /**
  * 索引が必要なら取りに行く（「調べる」のたびに呼ばれる）。
  *
- * - 24 時間以内に取れていて、**取得元が本番と一致**していれば何もしない
- * - そうでなければ取得し直す（古いローカル配信などから切り替える）
+ * - 直近 5 分以内に確認済みなら、そのまま使う
+ * - それより古ければ **ETag で再確認**（変わっていなければ 304 で本文なし）
  * - 取得に失敗しても、保存済みの索引があればそれで判定を続ける
  */
 async function ensureFreshIndex() {
@@ -351,13 +352,19 @@ async function ensureFreshIndex() {
   const stored = await chrome.storage.local.get([INDEX_KEY, INDEX_URL_KEY, "indexUpdatedAt"]);
   const hasCached = Boolean(stored[INDEX_KEY]);
   const sameSource = stored[INDEX_URL_KEY] === expected;
-  if (hasCached && sameSource && !isIndexStale(stored.indexUpdatedAt)) {
+  if (hasCached && sameSource && !isIndexStale(stored.indexUpdatedAt, Date.now(), INDEX_REVALIDATE_MS)) {
     return { refreshed: false, usedCached: true, url: expected };
   }
 
   try {
     const result = await refreshIndex(expected);
-    return { refreshed: true, count: result.count, usedCached: false, url: result.url };
+    return {
+      refreshed: !result.notModified,
+      notModified: Boolean(result.notModified),
+      count: result.count,
+      usedCached: false,
+      url: result.url,
+    };
   } catch (error) {
     // 許可が無い・配信が落ちている等。保存済みがあれば黙ってそれを使う。
     console.warn("索引の更新に失敗しました", error); // 拡張のサービスワーカー画面で確認できる
@@ -469,11 +476,27 @@ async function loadIndex() {
   }
 }
 
-/** 索引を取り直す。取得元は本番（``INDEX_CANDIDATES[0]``）のみ。 */
+/**
+ * 索引を取り直す。取得元は本番（``INDEX_CANDIDATES[0]``）のみ。
+ *
+ * ETag を送って再確認するので、**変わっていなければ 304（本文なし）**で終わる。
+ */
 async function refreshIndex(urlOverride) {
   const url = urlOverride ?? INDEX_CANDIDATES[0];
+  const cached = await chrome.storage.local.get([INDEX_KEY, INDEX_ETAG_KEY]);
 
-  const response = await fetch(url, { cache: "no-store" });
+  const headers = {};
+  if (cached[INDEX_ETAG_KEY]) headers["If-None-Match"] = cached[INDEX_ETAG_KEY];
+
+  const response = await fetch(url, { cache: "no-store", headers });
+
+  if (response.status === 304) {
+    // 変化なし。確認した時刻だけ更新する
+    await chrome.storage.local.set({ indexUpdatedAt: new Date().toISOString() });
+    const index = AdvisoryIndex.fromJSON(cached[INDEX_KEY]);
+    return { count: index.size, generatedAt: index.generatedAt, url, notModified: true };
+  }
+
   if (!response.ok) throw new Error(`索引を取得できません（HTTP ${response.status}）`);
   const data = await response.json();
   const index = AdvisoryIndex.fromJSON(data);
@@ -482,9 +505,10 @@ async function refreshIndex(urlOverride) {
   await chrome.storage.local.set({
     [INDEX_KEY]: data,
     [INDEX_URL_KEY]: url,
+    [INDEX_ETAG_KEY]: response.headers.get("etag") ?? "",
     indexUpdatedAt: new Date().toISOString(),
   });
-  return { count: index.size, generatedAt: index.generatedAt, url };
+  return { count: index.size, generatedAt: index.generatedAt, url, notModified: false };
 }
 
 /** 最も重い判定をバッジに出す（赤 > 黄 > 灰）。 */
