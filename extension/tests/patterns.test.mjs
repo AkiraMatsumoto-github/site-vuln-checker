@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { INDEX_CANDIDATES, INDEX_ORIGINS, INDEX_TTL_MS, INDEX_URL, isIndexStale } from "../config.js";
-import { originPattern, isAdminUrl } from "../patterns.js";
+import { isAdminUrl, isSiteHealthUrl, originPattern } from "../patterns.js";
 
 // Chrome のマッチパターンはポートを含められない（含めると一致しない）。
 test("ポートを落としてマッチパターンを作る", () => {
@@ -48,7 +48,22 @@ test("索引が無い・日時が壊れている場合は古いとみなす", ()
   assert.equal(isIndexStale("not-a-date"), true);
 });
 
-// --- 管理画面では HEAD を送らない（レビュー #10）------------------------------
+// --- サイトヘルス（URL で自動的に振り分ける）-------------------------------
+
+test("サイトヘルスの画面だけ実測値を読む対象にする", () => {
+  assert.equal(isSiteHealthUrl("https://example.com/wp-admin/site-health.php"), true);
+  assert.equal(isSiteHealthUrl("https://example.com/wp-admin/site-health.php?tab=debug"), true);
+  assert.equal(isSiteHealthUrl("https://example.com:8443/wp-admin/site-health.php"), true);
+});
+
+test("サイトヘルス以外の管理画面は対象にしない", () => {
+  assert.equal(isSiteHealthUrl("https://example.com/wp-admin/"), false);
+  assert.equal(isSiteHealthUrl("https://example.com/wp-admin/options-general.php"), false);
+  assert.equal(isSiteHealthUrl("https://example.com/"), false);
+  assert.equal(isSiteHealthUrl("https://example.com/blog/site-health.php"), false);
+  assert.equal(isSiteHealthUrl("not a url"), false);
+});
+
 
 test("管理画面は HEAD を送らない対象とみなす", () => {
   assert.equal(isAdminUrl("https://example.com/wp-admin/"), true);

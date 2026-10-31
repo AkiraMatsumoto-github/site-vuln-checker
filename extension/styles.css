@@ -63,13 +63,6 @@ button {
   cursor: pointer;
 }
 
-button.secondary {
-  background: var(--card);
-  color: var(--fg);
-  border-color: var(--line);
-  flex: 0 0 auto;
-}
-
 button:disabled {
   opacity: 0.6;
   cursor: default;

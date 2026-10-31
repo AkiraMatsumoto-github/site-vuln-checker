@@ -407,6 +407,10 @@ async function inspect({ askPermission = false } = {}) {
     } else if (refresh.error) {
       const cached = refresh.usedCached ? "（前回の索引で判定）" : "";
       $("status").textContent = `索引を更新できませんでした: ${describeIndexError(refresh.error)}${cached}`;
+    } else if (report.siteHealthRead?.info) {
+      $("status").textContent = "サイトヘルスから PHP などの実測値を読み取りました";
+    } else if (report.siteHealthRead?.error) {
+      $("status").textContent = `サイトヘルスは読めませんでした: ${report.siteHealthRead.error}`;
     } else {
       $("status").textContent = "";
     }
@@ -513,26 +517,6 @@ async function retryHeaderPermission() {
     : "許可されませんでした（判定は続けられます）";
   await inspect();
 }
-
-/** サイトヘルス（管理画面）を読んで、そのまま判定し直す。 */
-async function readSiteHealth() {
-  $("status").textContent = "サイトヘルスを読んでいます…";
-  const result = await chrome.runtime.sendMessage({ type: "readSiteHealth" }).catch((error) => ({
-    error: String(error?.message ?? error),
-  }));
-  if (result?.error) {
-    $("status").textContent = result.error;
-    return;
-  }
-  $("status").textContent = "サイトヘルスを読み取りました";
-  await inspect();
-}
-
-$("sitehealth").addEventListener("click", () => {
-  readSiteHealth().catch((error) => {
-    $("status").textContent = `失敗しました: ${String(error?.message ?? error)}`;
-  });
-});
 
 $("addVersion").addEventListener("click", () => {
   addVersion().catch((error) => {

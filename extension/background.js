@@ -13,7 +13,7 @@
 import { AdvisoryIndex, judge, normalizeSlug, summarizeLevels } from "./advisor.js";
 import { INDEX_CANDIDATES, INDEX_ORIGINS, INDEX_REVALIDATE_MS, isIndexStale } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
-import { isAdminUrl, originPattern } from "./patterns.js";
+import { isAdminUrl, isSiteHealthUrl, originPattern } from "./patterns.js";
 import { parseSiteHealth, siteHealthFindings } from "./sitehealth.js";
 
 const REPORT_KEY = "lastReport";
@@ -96,12 +96,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "loadIndex") {
     // 指定 URL から索引を読む（利用者が「調べる」を押した流れで呼ばれる）
     refreshIndex(message.url)
-      .then(sendResponse)
-      .catch((error) => sendResponse({ error: String(error?.message ?? error) }));
-    return true;
-  }
-  if (message?.type === "readSiteHealth") {
-    readSiteHealth()
       .then(sendResponse)
       .catch((error) => sendResponse({ error: String(error?.message ?? error) }));
     return true;
@@ -198,6 +192,15 @@ async function inspectActiveTab() {
     return { needsSitePermission: true, origin: originOf(url) };
   }
 
+  // 「ツール → サイトヘルス → 情報」を開いていれば、同じ操作で実測値も読む。
+  // ボタンを分けず、**対象の URL で処理を振り分ける**（利用者に選ばせない）。
+  let siteHealthRead = null;
+  if (isSiteHealthUrl(result.url ?? url)) {
+    siteHealthRead = await readSiteHealth(tab).catch((error) => ({
+      error: String(error?.message ?? error),
+    }));
+  }
+
   const headers = await readHeaders(result.url);
   const analysis = analyze({
     url: result.url,
@@ -253,6 +256,7 @@ async function inspectActiveTab() {
     indexRefresh,
     lifecycleSize: index?.lifecycles ? index.lifecycles.size : 0,
     versions,
+    siteHealthRead,
     scannedAt: new Date().toISOString(),
   };
 
@@ -426,23 +430,26 @@ function collectSiteHealth() {
  * 管理者としてログインしている**本人のサイト**だけ。表示済みの DOM を読むだけで、
  * 追加のリクエストはしない（企画書 6.4）。
  */
-async function readSiteHealth() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !/\/wp-admin\/site-health\.php/i.test(tab.url ?? "")) {
+async function readSiteHealth(tab) {
+  const target = tab ?? (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+  if (!target?.id || !isSiteHealthUrl(target.url)) {
     return { error: "WordPress の「ツール → サイトヘルス → 情報」を開いてから実行してください" };
   }
 
   const injected = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
+    target: { tabId: target.id },
     func: collectSiteHealth,
   });
   const sections = injected?.[0]?.result;
   if (!sections?.length) {
-    return { error: "サイトヘルスの表を読み取れませんでした（画面を開き直してください）" };
+    return {
+      error:
+        "サイトヘルスの表を読み取れませんでした（「情報」タブを開いてから、もう一度お試しください）",
+    };
   }
 
   const info = parseSiteHealth(sections);
-  const origin = originOf(tab.url);
+  const origin = originOf(target.url);
   const record = { ...info, readAt: new Date().toISOString() };
   if (origin) {
     const stored = await chrome.storage.local.get(SITE_HEALTH_KEY);
