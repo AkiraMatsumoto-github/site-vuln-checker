@@ -21,6 +21,56 @@ const SECTION_ALIASES = [
 const NAME_VERSION_RE = /^(.+?)\s*[:：]\s*(\d[0-9A-Za-z.+-]*)\s*$/;
 const VERSION_RE = /\d+\.\d+(?:\.\d+)*(?:[-+~][0-9A-Za-z.-]+)?/;
 
+//: 表の行ラベルは翻訳される（例: `php_version` ではなく「PHP version」）。
+//: 英語・日本語の表記ゆれを吸収するための別名。
+const FIELD_ALIASES = {
+  core: ["version", "バージョン"],
+  php: ["php_version", "php version", "php バージョン", "phpのバージョン"],
+  sapi: ["php_sapi", "php sapi"],
+  httpd: [
+    "httpd_software",
+    "web server",
+    "webserver",
+    "ウェブサーバー",
+    "webサーバー",
+    "サーバーソフトウェア",
+  ],
+  database: [
+    "server_version",
+    "database server version",
+    "データベースサーバーのバージョン",
+    "データベースのバージョン",
+  ],
+};
+
+//: テーマの「Name / Version / Author」のような**項目名**は、プラグイン名として扱わない。
+const FIELD_LABELS = new Set([
+  "name",
+  "version",
+  "author",
+  "auto-update",
+  "auto update",
+  "status",
+  "directory",
+  "directory size",
+  "translation",
+  "text direction",
+  "network",
+  "must-use",
+  "drop-in",
+  "名前",
+  "バージョン",
+  "作成者",
+  "自動更新",
+  "状態",
+  "ディレクトリ",
+  "ディレクトリのサイズ",
+  "翻訳",
+  "テキストの方向",
+  "ネットワーク",
+  "ドロップイン",
+]);
+
 function canonicalSection(id) {
   const text = String(id ?? "").trim().toLowerCase();
   for (const [key, aliases] of SECTION_ALIASES) {
@@ -29,42 +79,53 @@ function canonicalSection(id) {
   return null;
 }
 
+function normalizeLabel(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/[:：]\s*$/, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
 function rowsToMap(rows) {
   const map = new Map();
   for (const [label, value] of rows) {
-    const key = String(label ?? "")
-      .trim()
-      .replace(/[:：]\s*$/, "")
-      .toLowerCase();
-    map.set(key, String(value ?? "").trim());
+    map.set(normalizeLabel(label), String(value ?? "").trim());
   }
   return map;
 }
 
+/** 別名のどれかに一致する値を返す（`php_version` と「PHP version」の両方を受ける）。 */
+function pick(map, names) {
+  for (const name of names) {
+    const value = map.get(normalizeLabel(name));
+    if (value) return value;
+  }
+  return null;
+}
+
 function componentsFrom(rows) {
-  // 形式 1: 「プラグイン名: 1.2.3」の 1 行形式
+  // 形式 1: 「プラグイン名: 1.2.3」または「プラグイン名 | Version 1.2.3」
   const list = [];
   for (const [label, value] of rows) {
     const text = String(label ?? "").trim();
-    const match = NAME_VERSION_RE.exec(text);
-    if (match) {
-      list.push({ name: match[1].trim(), version: match[2] });
+    const inline = NAME_VERSION_RE.exec(text);
+    if (inline) {
+      list.push({ name: inline[1].trim(), version: inline[2] });
       continue;
     }
-    // 「名前」と「バージョン」が別の行になっている形式（テーマなど）
+    // 「Name / Version / Author」のような項目行は、名前として扱わない
+    if (!text || FIELD_LABELS.has(normalizeLabel(text))) continue;
     const version = VERSION_RE.exec(String(value ?? ""));
-    if (text && version && !text.endsWith(":") && !text.endsWith("：")) {
-      list.push({ name: text, version: version[0] });
-    }
+    if (version) list.push({ name: text, version: version[0] });
   }
   if (list.length) return list;
 
-  // 形式 2: 「name: / version:」の key-value 形式
+  // 形式 2: 「name: / version:」の key-value 形式（テーマなど）
   const map = rowsToMap(rows);
-  const name = map.get("name") ?? map.get("名前") ?? map.get("テーマ名");
+  const name = pick(map, ["name", "名前", "テーマ名", "plugin name", "プラグイン名"]);
   if (!name) return [];
-  const version = map.get("version") ?? map.get("バージョン") ?? null;
-  return [{ name, version }];
+  return [{ name, version: pick(map, ["version", "バージョン"]) }];
 }
 
 /**
@@ -91,13 +152,13 @@ export function parseSiteHealth(sections) {
     const rows = (section.rows ?? []).map(([a, b]) => [a ?? "", b ?? ""]);
     const map = rowsToMap(rows);
 
-    if (key === "wp-core") info.core = map.get("version") ?? info.core;
+    if (key === "wp-core") info.core = pick(map, FIELD_ALIASES.core) ?? info.core;
     if (key === "wp-server") {
-      info.php = map.get("php_version") ?? info.php;
-      info.sapi = map.get("php_sapi") ?? info.sapi;
-      info.httpd = map.get("httpd_software") ?? info.httpd;
+      info.php = pick(map, FIELD_ALIASES.php) ?? info.php;
+      info.sapi = pick(map, FIELD_ALIASES.sapi) ?? info.sapi;
+      info.httpd = pick(map, FIELD_ALIASES.httpd) ?? info.httpd;
     }
-    if (key === "wp-database") info.database = map.get("server_version") ?? info.database;
+    if (key === "wp-database") info.database = pick(map, FIELD_ALIASES.database) ?? info.database;
     if (key === "wp-plugins-active") info.pluginsActive = componentsFrom(rows);
     if (key === "wp-plugins-inactive") info.pluginsInactive = componentsFrom(rows);
     if (key === "wp-themes-active") info.themesActive = componentsFrom(rows);

@@ -217,6 +217,8 @@ function renderReport(report) {
     source = null;
   }
   const meta = [
+    // どの版が動いているか（リロードで反映されたかの確認に使う）
+    `v${chrome.runtime.getManifest().version}`,
     report.scannedAt ? `判定 ${new Date(report.scannedAt).toLocaleString()}` : null,
     generated
       ? `索引 ${report.indexSize ?? 0} 件（${generated.toLocaleDateString()} 生成）`
@@ -430,7 +432,14 @@ async function inspect({ askPermission = false } = {}) {
 
 async function restore() {
   const report = await chrome.runtime.sendMessage({ type: "getReport" }).catch(() => null);
-  if (report) renderReport(report);
+  // 前回の結果は、**同じ版で判定したものだけ**出す。
+  // （リロード直後に古いエラーが残って「直っていない」と誤解されるのを防ぐ）
+  const running = chrome.runtime.getManifest().version;
+  const isFresh = report && (report.extensionVersion ?? running) === running;
+  if (isFresh) renderReport(report);
+  if (report && !isFresh) {
+    $("status").textContent = "この版ではまだ調べていません。「このサイトを調べる」を押してください。";
+  }
   const stored = await chrome.storage.local.get(["indexUpdatedAt"]).catch(() => ({}));
   if (!stored.indexUpdatedAt) {
     $("status").textContent = "「このサイトを調べる」を押すと、索引を自動で用意します。";

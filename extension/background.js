@@ -13,7 +13,13 @@
 import { AdvisoryIndex, judge, normalizeSlug, summarizeLevels } from "./advisor.js";
 import { INDEX_CANDIDATES, INDEX_ORIGINS, INDEX_REVALIDATE_MS, isIndexStale } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
-import { isAdminUrl, isSiteHealthUrl, originPattern } from "./patterns.js";
+import {
+  isAdminHomeUrl,
+  isAdminUrl,
+  isSiteHealthInfoTab,
+  isSiteHealthUrl,
+  originPattern,
+} from "./patterns.js";
 import { parseSiteHealth, hasSiteHealthData, looksLikeSiteHealthHtml, siteHealthFindings } from "./sitehealth.js";
 
 const REPORT_KEY = "lastReport";
@@ -192,31 +198,59 @@ async function inspectActiveTab() {
     return { needsSitePermission: true, origin: originOf(url) };
   }
 
-  // サイトヘルスの画面なら、同じ操作で実測値も読む（ボタンは分けない）。
-  // 判定は URL だけでなく**ページの中身**でも行う:
-  //   - URL: `/wp-admin/` を `/admin/` に変えていても `site-health.php` なら拾う
-  //   - 中身: 「状態」タブのままでも情報の表は同じページにあるため
-  const siteHealthUrl = isSiteHealthUrl(result.url ?? url);
-  const siteHealthPage = siteHealthUrl || looksLikeSiteHealthHtml(result.html);
+  // サイトヘルスの表は「情報」タブ（?tab=debug）にしか出力されない。
+  // 次の場合は、同じ操作の中で**自動で情報タブへ移動**して読み直す:
+  //   - サイトヘルスのステータス画面を開いている
+  //   - 管理画面のトップ（/wp-admin/ または /wp-admin/index.php）を開いている
+  const startUrl = result.url ?? url;
+  const startedOnSiteHealth = isSiteHealthUrl(startUrl);
+  const startedOnAdminHome = isAdminHomeUrl(startUrl);
 
   let siteHealthRead = null;
-  if (siteHealthPage) {
-    const read = await readSiteHealth(tab).catch((error) => ({
-      error: String(error?.message ?? error),
-    }));
-    // 明示的にサイトヘルスを開いているときだけ「読めなかった」と伝える
+  let evidence = result;
+
+  if (startedOnSiteHealth || startedOnAdminHome || looksLikeSiteHealthHtml(result.html)) {
+    // 管理画面トップには表が無いので、最初の読み取りは省く
+    let read = startedOnAdminHome
+      ? null
+      : await readSiteHealth(tab).catch((error) => ({
+          error: String(error?.message ?? error),
+        }));
+
+    const needsMove =
+      !read?.info && (startedOnSiteHealth || startedOnAdminHome) && !isSiteHealthInfoTab(startUrl);
+    if (needsMove) {
+      const moved = await openSiteHealthInfoTab(tab).catch(() => false);
+      if (moved) {
+        // 移動後は HTML とリソースを取り直す（判定も情報タブの内容で行う）
+        const injected = await chrome.scripting
+          .executeScript({ target: { tabId: tab.id }, func: collectEvidence })
+          .catch(() => null);
+        const page = injected?.[0]?.result;
+        if (page) {
+          evidence = page;
+          const freshTab = await chrome.tabs.get(tab.id).catch(() => tab);
+          read = await readSiteHealth(freshTab).catch((error) => ({
+            error: String(error?.message ?? error),
+          }));
+        }
+      }
+    }
+
+    // サイトヘルスを開いていた／管理画面トップから来たときだけ「読めなかった」と伝える
     // （本文に health-check とあるだけのページで警告を出さない）
-    const reportable = Boolean(read?.info) || siteHealthUrl;
+    const reportable = Boolean(read?.info) || startedOnSiteHealth || startedOnAdminHome;
     siteHealthRead = reportable ? read : null;
   }
 
+  const siteHealthPage = isSiteHealthUrl(evidence.url) || looksLikeSiteHealthHtml(evidence.html);
   // サイトヘルスの画面では HEAD を送らない（値は画面から取れるうえ、
   // 管理画面への HEAD はログイン画面へのリダイレクトしか返らない）
-  const headers = siteHealthPage ? {} : await readHeaders(result.url);
+  const headers = siteHealthPage ? {} : await readHeaders(evidence.url);
   const analysis = analyze({
-    url: result.url,
-    html: result.html,
-    resources: result.resources,
+    url: evidence.url,
+    html: evidence.html,
+    resources: evidence.resources,
     headers,
   });
   const { versions, origin } = await readVersions();
@@ -268,6 +302,8 @@ async function inspectActiveTab() {
     lifecycleSize: index?.lifecycles ? index.lifecycles.size : 0,
     versions,
     siteHealthRead,
+    // どの版で判定したか（サイドパネル側で「古い結果」を弾くのに使う）
+    extensionVersion: chrome.runtime.getManifest().version,
     scannedAt: new Date().toISOString(),
   };
 
@@ -414,11 +450,28 @@ async function ensureFreshIndex() {
 function collectSiteHealth() {
   const sections = [];
   for (const table of document.querySelectorAll("table")) {
+    // セクションのキーは、WordPress がパネルに付けている id から取る
+    // （例: id="health-check-accordion-block-wp-server"）。
+    // 見出しの文言は翻訳されるため、id のほうが確実。
+    let key = "";
+    let node = table;
+    while (node && !key) {
+      const match = /^health-check-accordion-block-(.+)$/.exec(node.id || "");
+      if (match) key = match[1];
+      node = node.parentElement;
+    }
+
+    // id が無い実装向けのフォールバック: **親をたどりながら** h2〜h4 の見出しを探す。
+    // （WordPress は表を `<div class="health-check-accordion-panel">` で包む）
     let heading = "";
-    let node = table.previousElementSibling;
+    node = table;
     while (node && !heading) {
-      if (/^H[2-4]$/.test(node.tagName)) heading = node.textContent || "";
-      node = node.previousElementSibling;
+      let sibling = node.previousElementSibling;
+      while (sibling && !heading) {
+        if (/^H[2-4]$/.test(sibling.tagName)) heading = sibling.textContent || "";
+        sibling = sibling.previousElementSibling;
+      }
+      node = node.parentElement;
     }
     if (!heading) {
       const caption = table.querySelector("caption");
@@ -430,9 +483,63 @@ function collectSiteHealth() {
       if (cells.length < 2) continue;
       rows.push([cells[0].textContent || "", cells[1].textContent || ""]);
     }
-    if (rows.length) sections.push({ id: heading.trim(), rows });
+    if (rows.length) sections.push({ id: (key || heading).trim(), rows });
   }
   return sections;
+}
+
+/**
+ * サイトヘルス「情報」タブの URL を作る。
+ *
+ * - ステータス画面（site-health.php）→ `?tab=debug` を付ける
+ * - 管理画面のトップ（`/wp-admin/` や `/wp-admin/index.php`）→ `…/site-health.php?tab=debug`
+ *
+ * 作れない URL のときは `null`（例: 投稿の編集画面。未保存の内容を失わせないため移動しない）。
+ */
+function siteHealthInfoUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+
+  if (isSiteHealthUrl(url)) {
+    parsed.searchParams.set("tab", "debug");
+    return parsed.toString();
+  }
+
+  const match = /^(.*\/wp-admin\/)(?:index\.php)?$/i.exec(parsed.pathname);
+  if (!match) return null;
+  parsed.pathname = `${match[1]}site-health.php`;
+  parsed.search = "";
+  parsed.searchParams.set("tab", "debug");
+  return parsed.toString();
+}
+
+/**
+ * サイトヘルスの「情報」タブへ移動し、読み込みが終わるまで待つ。
+ *
+ * WordPress は「情報」タブのときだけ表を出力するので、ステータス画面や
+ * 管理画面トップで押されたら自動で切り替える。
+ */
+async function openSiteHealthInfoTab(tab) {
+  if (!tab?.id) return false;
+  const target = siteHealthInfoUrl(tab.url);
+  if (!target) return false;
+  await chrome.tabs.update(tab.id, { url: target });
+  return waitForTabComplete(tab.id, "tab=debug");
+}
+
+/** 指定の URL になって読み込みが終わるまで待つ（最大 15 秒）。 */
+async function waitForTabComplete(tabId, needle, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = await chrome.tabs.get(tabId).catch(() => null);
+    if (current?.url?.includes(needle) && current.status === "complete") return true;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return false;
 }
 
 /**
@@ -456,9 +563,22 @@ async function readSiteHealth(tab) {
 
   const info = parseSiteHealth(sections ?? []);
   if (!hasSiteHealthData(info)) {
+    const count = (sections ?? []).length;
+    // 原因の切り分け用（Service Worker のコンソールにも出す）
+    console.info(
+      "[SVC] サイトヘルスの表を読めませんでした",
+      `url=${target.url}`,
+      `tables=${count}`,
+      `ids=${(sections ?? [])
+        .map((section) => section.id)
+        .slice(0, 10)
+        .join(" / ")}`,
+    );
     return {
       error:
-        "サイトヘルスの表を読み取れませんでした（ページを再読み込みしてから、もう一度お試しください）",
+        count === 0
+          ? "サイトヘルスの表が見つかりませんでした（「情報」タブを開いてから、もう一度お試しください）"
+          : `サイトヘルスの表は ${count} 件ありましたが、PHP などの項目を読めませんでした（「情報」タブを開き直してください）`,
     };
   }
   const origin = originOf(target.url);

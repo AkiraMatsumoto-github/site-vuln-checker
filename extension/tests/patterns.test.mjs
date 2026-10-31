@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { INDEX_CANDIDATES, INDEX_ORIGINS, INDEX_TTL_MS, INDEX_URL, isIndexStale } from "../config.js";
-import { isAdminUrl, isSiteHealthUrl, originPattern } from "../patterns.js";
+import {
+  isAdminHomeUrl,
+  isAdminUrl,
+  isSiteHealthInfoTab,
+  isSiteHealthUrl,
+  originPattern,
+} from "../patterns.js";
 
 // Chrome のマッチパターンはポートを含められない（含めると一致しない）。
 test("ポートを落としてマッチパターンを作る", () => {
@@ -74,6 +80,35 @@ test("サイトヘルス以外の管理画面は対象にしない", () => {
   assert.equal(isSiteHealthUrl("https://example.com/blog/site-health.php"), true, "任意の場所の site-health.php");
   assert.equal(isSiteHealthUrl("https://example.com/wp-admin/site-health.php.bak"), false);
   assert.equal(isSiteHealthUrl("not a url"), false);
+});
+
+test("管理画面のトップだけを自動遷移の対象にする", () => {
+  // /wp-admin/ と /wp-admin/index.php だけ（投稿の編集中などは遷移しない）
+  assert.equal(isAdminHomeUrl("https://example.com/wp-admin/"), true);
+  assert.equal(isAdminHomeUrl("https://example.com/wp-admin/index.php"), true);
+  assert.equal(isAdminHomeUrl("https://example.com/wp-admin/index.php?foo=1"), true);
+  assert.equal(isAdminHomeUrl("https://example.com/wp/wp-admin/"), true, "サブディレクトリ設置");
+  assert.equal(isAdminHomeUrl("https://example.com:8443/wp-admin/"), true);
+  // 対象外（未保存の編集を失わせないため）
+  assert.equal(isAdminHomeUrl("https://example.com/wp-admin/post.php?post=1&action=edit"), false);
+  assert.equal(isAdminHomeUrl("https://example.com/wp-admin/plugins.php"), false);
+  assert.equal(isAdminHomeUrl("https://example.com/wp-admin/site-health.php"), false);
+  assert.equal(isAdminHomeUrl("https://example.com/"), false);
+  assert.equal(isAdminHomeUrl("not a url"), false);
+});
+
+// --- サイトヘルスの「情報」タブ判定 ------------------------------------------
+
+test("「情報」タブ（?tab=debug）だけを情報タブとみなす", () => {
+  assert.equal(isSiteHealthInfoTab("https://example.com/wp-admin/site-health.php?tab=debug"), true);
+  assert.equal(
+    isSiteHealthInfoTab("https://example.com/admin/site-health.php?tab=debug&foo=1"),
+    true,
+  );
+  // ステータス画面（表が無い）は情報タブではない
+  assert.equal(isSiteHealthInfoTab("https://example.com/wp-admin/site-health.php"), false);
+  assert.equal(isSiteHealthInfoTab("https://example.com/wp-admin/site-health.php?tab=status"), false);
+  assert.equal(isSiteHealthInfoTab("not a url"), false);
 });
 
 

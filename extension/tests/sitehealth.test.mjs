@@ -77,6 +77,43 @@ test("findings へ変換すると サイトヘルス根拠・確度 1 になる"
   assert.equal(inactive.length, 1);
 });
 
+test("DOM の表示ラベル（「PHP version」など）でも読める", () => {
+  // WordPress の「情報」タブは、キーではなく**翻訳済みの表示名**を表の行ラベルに使う
+  const sections = [
+    { id: "wp-core", rows: [["Version", "6.8.2"]] },
+    {
+      id: "wp-server",
+      rows: [
+        ["Web server", "nginx/1.27.3"],
+        ["PHP version", "8.1.31"],
+        ["PHP SAPI", "fpm-fcgi"],
+      ],
+    },
+    { id: "wp-database", rows: [["Database server version", "MariaDB 10.6.18"]] },
+    {
+      id: "wp-plugins-active",
+      rows: [["Contact Form 7", "Version 5.9.8 | Auto-updates: Disabled"]],
+    },
+    {
+      id: "wp-active-theme",
+      rows: [
+        ["Name", "Twenty Twenty-Five"],
+        ["Version", "1.2"],
+        ["Author", "the WordPress team"],
+      ],
+    },
+  ];
+
+  const info = parseSiteHealth(sections);
+  assert.equal(info.core, "6.8.2");
+  assert.equal(info.php, "8.1.31");
+  assert.equal(info.httpd, "nginx/1.27.3");
+  assert.equal(info.sapi, "fpm-fcgi");
+  assert.equal(info.database, "MariaDB 10.6.18");
+  assert.deepEqual(info.pluginsActive, [{ name: "Contact Form 7", version: "5.9.8" }]);
+  assert.deepEqual(info.themesActive, [{ name: "Twenty Twenty-Five", version: "1.2" }]);
+});
+
 test("空の入力でも落ちない", () => {
   const info = parseSiteHealth([]);
   assert.equal(info.php, null);

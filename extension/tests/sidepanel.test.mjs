@@ -21,6 +21,15 @@ test("操作ボタンは「調べる」1 つだけ（画面ごとに分けない
   assert.doesNotMatch(html, /id="sitehealth"/, "サイトヘルス専用のボタンは置かない");
 });
 
+test("古い版で判定した結果は復元しない（リロード直後の誤解を防ぐ）", () => {
+  assert.match(sidepanel, /report\.extensionVersion/, "結果の版を見ていない");
+  assert.match(
+    sidepanel,
+    /isFresh = report && \(report\.extensionVersion \?\? running\) === running/,
+    "版が違う結果を弾いていない",
+  );
+});
+
 test("勧告の一覧はどのレベルも details に畳む（赤だけ展開しない）", () => {
   // レベルごとの分岐（level === "none" のような特別扱い）をしない
   assert.doesNotMatch(sidepanel, /level === "none"/, "レベルごとに表示方法を変えない");
@@ -34,11 +43,20 @@ test("勧告の一覧はどのレベルも details に畳む（赤だけ展開�
 
 test("サイトヘルスは「調べる」の中で URL と中身により振り分ける", () => {
   // 判定の入口（inspectActiveTab）がサイトヘルスかどうかを判断して読み取りを呼ぶ
-  assert.match(background, /const siteHealthUrl = isSiteHealthUrl\(/, "URL による振り分けが無い");
   assert.match(
     background,
-    /siteHealthPage = siteHealthUrl \|\| looksLikeSiteHealthHtml\(result\.html\)/,
+    /const startedOnSiteHealth = isSiteHealthUrl\(/,
+    "URL による振り分けが無い",
+  );
+  assert.match(
+    background,
+    /siteHealthPage = isSiteHealthUrl\(evidence\.url\) \|\| looksLikeSiteHealthHtml\(evidence\.html\)/,
     "URL が違っても中身で判断できない",
+  );
+  assert.match(
+    background,
+    /openSiteHealthInfoTab\(tab\)/,
+    "ステータス画面から「情報」タブへ自動で移動していない",
   );
 
   // ボタン側からサイトヘルス専用のメッセージを送らない（入口は 1 つ）

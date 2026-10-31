@@ -32,6 +32,34 @@ export function isAdminUrl(url) {
 }
 
 /**
+ * サイトヘルスの「情報」タブか（``?tab=debug``）。
+ *
+ * WordPress は**情報タブのときだけ** PHP・プラグインの表を HTML に出力する。
+ * 「ステータス」タブ（``?tab`` なし）には表が無いので、自動で切り替える必要がある。
+ */
+export function isSiteHealthInfoTab(url) {
+  try {
+    return new URL(url).searchParams.get("tab") === "debug";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * WordPress の**管理画面のトップ**か（``/wp-admin/`` または ``/wp-admin/index.php``）。
+ *
+ * ここからだけサイトヘルスへ自動で移動する（投稿の編集中などに遷移して
+ * 未保存の内容を失わせないため、対象を絞っている）。
+ */
+export function isAdminHomeUrl(url) {
+  try {
+    return /\/wp-admin\/(?:index\.php)?$/i.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * WordPress の「サイトヘルス」の画面か（「情報」タブでなくてもよい）。
  *
  * サイトヘルスの情報は**同じページに全部入っている**（タブは表示の切り替えだけ）ので、
