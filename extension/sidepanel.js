@@ -1,7 +1,7 @@
 // サイドパネルの UI。判定は background が行い、ここは結果を描くだけ。
 // 値はすべて textContent で入れる（ページ由来の文字列を HTML として解釈しない）。
 
-import { affectedRangeText } from "./advisor.js";
+import { advisoriesSummary, affectedRangeText, exposureLabel, impactLabel } from "./advisor.js";
 import { INDEX_CANDIDATES, INDEX_ORIGINS } from "./config.js";
 import { originPattern } from "./patterns.js";
 
@@ -28,25 +28,36 @@ function element(tag, className, text) {
 }
 
 
-/** 1 件分の勧告行（「どの Version が危ないか」を先に出す）。 */
+/**
+ * 1 件分の勧告（「どの Version が危ないか」→「攻撃の可能性」→「攻撃時の影響度」）。
+ *
+ * 数字（CVSS / EPSS）と専門用語は出さず、2 軸を 1 語で示す。
+ */
 function advisoryLine(advisory) {
   const ranges = (advisory.ranges ?? [affectedRangeText(advisory)]).filter(Boolean);
-  const parts = [ranges.length ? `${ranges.join(" / ")}が影響` : "影響する Version は不明"];
-  // 修正版が範囲から自明（「X より前が影響」なら X が修正版）なときは繰り返さない
   const fixed = advisory.fixed;
-  if (fixed && fixed !== advisory.affected_below && fixed !== advisory.affected_upto) {
-    parts.push(`${fixed} で修正`);
-  }
-  if (advisory.cvss !== null && advisory.cvss !== undefined) parts.push(`深刻度 ${advisory.cvss}`);
-  if (advisory.kev) parts.push("実際に悪用あり");
-  // 0% は情報量が無いので出さない
-  if (advisory.epss !== null && advisory.epss !== undefined && advisory.epss >= 0.01) {
-    parts.push(`悪用の可能性 ${Math.round(advisory.epss * 100)}%`);
-  }
+  // 修正版が範囲から自明（「X より前が影響」なら X が修正版）なときは繰り返さない
+  const showFixed = fixed && fixed !== advisory.affected_below && fixed !== advisory.affected_upto;
 
   const item = element("li");
-  item.append(element("code", "", advisory.id));
-  item.append(document.createTextNode(` ｜ ${parts.join(" ｜ ")}`));
+
+  const head = element("div", "adv-head");
+  head.append(element("code", "", advisory.id));
+  head.append(
+    document.createTextNode(
+      ` ｜ ${ranges.length ? `${ranges.join(" / ")}が影響` : "影響する Version は不明"}` +
+        (showFixed ? ` ｜ ${fixed} で修正` : ""),
+    ),
+  );
+  item.append(head);
+
+  item.append(
+    element(
+      "div",
+      "adv-meta",
+      `攻撃の可能性 ${exposureLabel(advisory)} ｜ 攻撃時の影響度 ${impactLabel(advisory.cvss)}`,
+    ),
+  );
   return item;
 }
 
@@ -65,18 +76,14 @@ function judgementItem(judgement, level) {
 
   const advisories = judgement.advisories ?? [];
   if (advisories.length) {
+    // **どのレベルも同じ形**（見出し 1 行 + 折りたたみ）にそろえる。
+    // 赤でも 5 件を並べないので、カードの高さが読む前に分かる。
+    const details = document.createElement("details");
+    details.append(element("summary", "", advisoriesSummary(advisories, level)));
     const list = element("ul", "advisories");
     list.append(...advisories.map(advisoryLine));
-
-    if (level === "none") {
-      // 該当なしのときは、過去の勧告を**畳んで**出す（同じ CVE の山で誤解させない）
-      const details = document.createElement("details");
-      const summary = element("summary", "", `過去の勧告（${advisories.length}件）を見る`);
-      details.append(summary, list);
-      item.append(details);
-    } else {
-      item.append(list);
-    }
+    details.append(list);
+    item.append(details);
   }
   return item;
 }

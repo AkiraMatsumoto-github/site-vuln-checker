@@ -369,18 +369,58 @@ def _unique_by_id(advisories: list[Advisory]) -> tuple[Advisory, ...]:
     return tuple(merged)
 
 
+def impact_label(cvss: float | None) -> str:
+    """攻撃時の影響度を 1 語にする（専門用語の CVSS は画面に出さない）。
+
+    特大（9.0 以上）、大（7.0〜8.9）、中（4.0〜6.9）、微（3.9 以下）、不明。
+    """
+    if cvss is None:
+        return "不明"
+    score = float(cvss)
+    if score >= 9:
+        return "特大"
+    if score >= 7:
+        return "大"
+    if score >= 4:
+        return "中"
+    return "微"
+
+
+def exposure_label(kev: bool, epss: float | None) -> str:
+    """攻撃の可能性を 1 語にする（拡張の ``exposureLabel`` と同じ）。
+
+    - ``実績あり``: 実際に悪用された事例が確認されている（KEV）。予測より強い根拠
+    - ``特大``: 30 日以内に悪用されると予測される確率が 50% 以上
+    - ``大``: 10% 以上、``中``: 1% 以上、``微``: 1% 未満、``不明``: 情報なし
+    """
+    if kev:
+        return "実績あり"
+    if epss is None:
+        return "不明"
+    value = float(epss)
+    if value >= 0.5:
+        return "特大"
+    if value >= 0.1:
+        return "大"
+    if value >= 0.01:
+        return "中"
+    return "微"
+
+
+def _max_of(affected: list[Advisory], key: str) -> float:
+    return max((float(getattr(advisory, key) or 0.0) for advisory in affected), default=0.0)
+
+
 def _risk_reason(affected: list[Advisory]) -> str:
-    """「どれくらい危ないか」を 1 文で表す（CVE の羅列ではなく理由を伝える）。"""
-    if any(a.kev for a in affected):
-        return "実際に悪用が確認されています"
-    max_cvss = max((a.cvss or 0.0) for a in affected)
-    if max_cvss >= RED_CVSS:
-        return f"深刻度が非常に高い弱点があります（{max_cvss:.1f}）"
-    max_epss = max((a.epss or 0.0) for a in affected)
+    """「なぜ危ないのか」を、画面と同じ 2 軸の言葉で 1 行にする。"""
+    if any(advisory.kev for advisory in affected):
+        return "攻撃の可能性: 実績あり"
+    max_epss = _max_of(affected, "epss")
     if max_epss >= RED_EPSS:
-        return f"30 日以内に悪用される確率が高い弱点があります（{max_epss * 100:.0f}%）"
+        return f"攻撃の可能性: {exposure_label(False, max_epss)}"
+    max_cvss = _max_of(affected, "cvss")
     if max_cvss:
-        return f"弱点の影響を受けます（深刻度 {max_cvss:.1f}）"
+        return f"攻撃時の影響度: {impact_label(max_cvss)}"
     return "弱点の影響を受けます"
 
 

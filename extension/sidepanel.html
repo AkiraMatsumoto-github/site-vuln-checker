@@ -47,6 +47,10 @@
     <main id="result" hidden>
       <section>
         <h2>判定結果</h2>
+        <p class="hint legend">
+          赤・黄は「<strong>攻撃の可能性</strong>」（実績あり ＞ 特大 ＞ 大 ＞ 中 ＞ 微）と「<strong>攻撃時の影響度</strong>」（特大 ＞ 大 ＞ 中 ＞ 微）で決めています。
+          「実績あり」は、実際に悪用された事例が確認されているものです。
+        </p>
         <div class="levels">
           <div class="light red" data-level="red">
             <div class="light-head">
@@ -113,6 +117,20 @@
 
       <footer>
         <p>判定は公開情報に基づく<strong>推定</strong>です。安全性を保証するものではありません。</p>
+        <p class="links">
+          <a
+            href="https://github.com/AkiraMatsumoto-github/site-vuln-checker/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+            >不具合・ご意見・異議申立て</a
+          >
+          <a
+            href="https://akiramatsumoto-github.github.io/site-vuln-checker/privacy.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            >プライバシーポリシー</a
+          >
+        </p>
         <p id="meta" class="meta"></p>
       </footer>
     </main>

@@ -70,8 +70,8 @@ def test_render_includes_judgement_section() -> None:
     html_text = render(_payload_with_judgement())
     assert "更新すべきもの（判定）" in html_text
     assert "CVE-2025-90001" in html_text
-    assert "実際に悪用あり" in html_text
-    assert "悪用の可能性 42%" in html_text
+    assert "攻撃の可能性 <b>実績あり</b>" in html_text
+    assert "攻撃時の影響度 特大" in html_text
     assert "修正版 5.9.9 に更新してください" in html_text
     assert "赤（要対応）" in html_text
 

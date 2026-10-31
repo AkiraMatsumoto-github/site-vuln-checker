@@ -228,14 +228,44 @@ button:disabled {
 
 details summary {
   margin-top: 2px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   cursor: pointer;
+}
+
+/* 勧告の見出しは「押せば中身が見える」ことが伝わるように */
+details summary:hover,
+details[open] summary {
+  color: var(--fg);
+}
+
+details[open] summary {
+  margin-bottom: 4px;
 }
 
 details .advisories {
   margin-top: 4px;
   padding-left: 12px;
+}
+
+details .advisories > li {
+  margin-bottom: 8px;
+}
+
+details .advisories > li:last-child {
+  margin-bottom: 0;
+}
+
+/* 勧告の 1 行目（CVE と影響する Version）*/
+.adv-head {
+  color: var(--fg);
+}
+
+/* 2 行目以降（攻撃されやすさ・攻撃されたときの大きさ）*/
+.adv-meta {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .advisories code {
@@ -291,6 +321,23 @@ footer {
   font-family: ui-monospace, Consolas, monospace;
 }
 
+/* フッターのリンク（サポート・プライバシーポリシー） */
+footer .links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0;
+}
+
+footer .links a {
+  color: #2b6cb0;
+  text-decoration: underline;
+}
+
+footer .links a:hover {
+  text-decoration: none;
+}
+
 /* --- バージョン入力 ------------------------------------------------------- */
 
 .versions {
@@ -299,6 +346,13 @@ footer {
 
 .versions .hint {
   margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* 判定結果の凡例（2 軸の見方）*/
+.legend {
+  margin: 0 0 10px;
   font-size: 11px;
   color: var(--muted);
 }

@@ -129,6 +129,60 @@ export function affectedRangeText(advisory) {
 }
 
 /**
+ * 「攻撃時の影響度」を 1 語にする。
+ *
+ * **CVSS という専門用語と数字は画面に出さない**（意味が伝わらないため）。
+ * 特大（9.0 以上）、大（7.0〜8.9）、中（4.0〜6.9）、微（3.9 以下）、不明。
+ */
+export function impactLabel(cvss) {
+  if (cvss === null || cvss === undefined) return "不明";
+  const score = Number(cvss);
+  if (score >= 9) return "特大";
+  if (score >= 7) return "大";
+  if (score >= 4) return "中";
+  return "微";
+}
+
+/**
+ * 「攻撃の可能性」を 1 語にする。
+ *
+ * - `実績あり`: 実際に悪用された事例が確認されている（KEV）。予測より強い根拠
+ * - `特大`: 30 日以内に悪用されると予測される確率が 50% 以上
+ * - `大`: 10% 以上 、 `中`: 1% 以上 、 `微`: 1% 未満 、 `不明`: 情報なし
+ */
+export function exposureLabel(advisory) {
+  if (advisory?.kev) return "実績あり";
+  const epss = advisory?.epss ?? null;
+  if (epss === null || epss === undefined) return "不明";
+  if (epss >= 0.5) return "特大";
+  if (epss >= 0.1) return "大";
+  if (epss >= 0.01) return "中";
+  return "微";
+}
+
+/**
+ * 勧告一覧の見出し（**どのレベルも同じ形**で `details` に畳む）。
+ *
+ * - 赤・黄: 今回の Version が**影響を受けている**勧告（判断の根拠）
+ * - 不明: Version が分からないので、**関係する可能性がある**勧告
+ * - 緑・情報: もう**修正済み**の過去の勧告（判断には影響しない）
+ *
+ * 見出しだけで「何件・どの CVE か」が分かるようにして、行数を増やさない。
+ */
+export function advisoriesSummary(advisories, level) {
+  const list = advisories ?? [];
+  if (!list.length) return "";
+  const first = list[0]?.id ? `${list[0].id}${list.length > 1 ? " ほか" : ""}` : "";
+  if (level === LEVEL.RED || level === LEVEL.YELLOW) {
+    return `影響する勧告 ${list.length} 件${first ? `（${first}）` : ""}を見る`;
+  }
+  if (level === LEVEL.GRAY) {
+    return `関係する勧告 ${list.length} 件${first ? `（${first}）` : ""}を見る`;
+  }
+  return `過去の勧告 ${list.length} 件を見る`;
+}
+
+/**
  * 同じ CVE を 1 つにまとめる（CPE 由来の勧告は系統ごとに別レコードになるため）。
  *
  * **範囲は落とさない**: PHP のように 1 つの CVE が 8.2/8.3/8.4/8.5 で別範囲を持つ場合、
@@ -148,16 +202,15 @@ function uniqueById(advisories) {
   });
 }
 
-/** 「どれくらい危ないか」を 1 文で表す（CVE の羅列ではなく理由を伝える）。 */
+/** 「なぜ危ないのか」を、画面と同じ 2 軸の言葉で 1 行にする。 */
 function riskReason(affected) {
-  if (affected.some((advisory) => advisory.kev)) return "実際に悪用が確認されています";
-  const maxCvss = Math.max(...affected.map((advisory) => advisory.cvss ?? 0));
-  if (maxCvss >= RED_CVSS) return `深刻度が非常に高い弱点があります（${maxCvss.toFixed(1)}）`;
-  const maxEpss = Math.max(...affected.map((advisory) => advisory.epss ?? 0));
-  if (maxEpss >= RED_EPSS) {
-    return `30 日以内に悪用される確率が高い弱点があります（${Math.round(maxEpss * 100)}%）`;
-  }
-  if (maxCvss) return `弱点の影響を受けます（深刻度 ${maxCvss.toFixed(1)}）`;
+  const maxOf = (list, key) =>
+    list.reduce((max, item) => Math.max(max, Number(item[key] ?? 0)), 0);
+  if (affected.some((advisory) => advisory.kev)) return "攻撃の可能性: 実績あり";
+  const maxEpss = maxOf(affected, "epss");
+  if (maxEpss >= RED_EPSS) return `攻撃の可能性: ${exposureLabel({ epss: maxEpss })}`;
+  const maxCvss = maxOf(affected, "cvss");
+  if (maxCvss) return `攻撃時の影響度: ${impactLabel(maxCvss)}`;
   return "弱点の影響を受けます";
 }
 

@@ -21,9 +21,25 @@ test("操作ボタンは「調べる」1 つだけ（画面ごとに分けない
   assert.doesNotMatch(html, /id="sitehealth"/, "サイトヘルス専用のボタンは置かない");
 });
 
-test("サイトヘルスは「調べる」の中で URL により振り分ける", () => {
-  // 判定の入口（inspectActiveTab）が URL を見て読み取りを呼ぶ
-  assert.match(background, /if \(isSiteHealthUrl\(/, "URL による振り分けが無い");
+test("勧告の一覧はどのレベルも details に畳む（赤だけ展開しない）", () => {
+  // レベルごとの分岐（level === "none" のような特別扱い）をしない
+  assert.doesNotMatch(sidepanel, /level === "none"/, "レベルごとに表示方法を変えない");
+  assert.match(sidepanel, /advisoriesSummary\(advisories, level\)/, "見出しの生成を通していない");
+  assert.equal(
+    (sidepanel.match(/document\.createElement\("details"\)/g) ?? []).length,
+    1,
+    "details の組み立ては 1 か所にまとめる",
+  );
+});
+
+test("サイトヘルスは「調べる」の中で URL と中身により振り分ける", () => {
+  // 判定の入口（inspectActiveTab）がサイトヘルスかどうかを判断して読み取りを呼ぶ
+  assert.match(background, /const siteHealthUrl = isSiteHealthUrl\(/, "URL による振り分けが無い");
+  assert.match(
+    background,
+    /siteHealthPage = siteHealthUrl \|\| looksLikeSiteHealthHtml\(result\.html\)/,
+    "URL が違っても中身で判断できない",
+  );
 
   // ボタン側からサイトヘルス専用のメッセージを送らない（入口は 1 つ）
   assert.doesNotMatch(sidepanel, /type: "readSiteHealth"/);

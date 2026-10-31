@@ -4,7 +4,10 @@ import { test } from "node:test";
 import {
   AdvisoryIndex,
   LEVEL,
+  advisoriesSummary,
   compareVersions,
+  exposureLabel,
+  impactLabel,
   isAffected,
   judge,
   normalizeSlug,
@@ -341,5 +344,66 @@ test("同じ CVE の複数範囲は ranges に残す（1 つに潰さない）",
   const judgements = judge({ findings: [language("php", null)] }, index);
   assert.equal(judgements[0].advisories.length, 1, "同じ CVE は 1 行");
   assert.equal(judgements[0].advisories[0].ranges.length, 4, "範囲はすべて残す");
+});
+
+// --- 勧告の言い回し（数字ではなく 1 語で）------------------------------------
+
+test("攻撃時の影響度は 1 語にする（CVSS は出さない）", () => {
+  assert.equal(impactLabel(9.2), "特大");
+  assert.equal(impactLabel(9), "特大");
+  assert.equal(impactLabel(8.2), "大");
+  assert.equal(impactLabel(7.0), "大");
+  assert.equal(impactLabel(6.5), "中");
+  assert.equal(impactLabel(5), "中");
+  assert.equal(impactLabel(4.0), "中");
+  assert.equal(impactLabel(3.9), "微");
+  assert.equal(impactLabel(null), "不明");
+});
+
+test("攻撃の可能性は 実績あり / 特大 / 大 / 中 / 微 / 不明 で言う", () => {
+  // 実際に悪用された実績（KEV）は最上位。予測値より強い根拠
+  assert.equal(exposureLabel({ kev: true }), "実績あり");
+  assert.equal(exposureLabel({ kev: true, epss: 0.996 }), "実績あり");
+  assert.equal(exposureLabel({ epss: 0.996 }), "特大");
+  assert.equal(exposureLabel({ epss: 0.5 }), "特大");
+  assert.equal(exposureLabel({ epss: 0.738 }), "特大");
+  assert.equal(exposureLabel({ epss: 0.2 }), "大");
+  assert.equal(exposureLabel({ epss: 0.1 }), "大");
+  assert.equal(exposureLabel({ epss: 0.05 }), "中");
+  assert.equal(exposureLabel({ epss: 0.01 }), "中");
+  assert.equal(exposureLabel({ epss: 0.005 }), "微");
+  // 情報が無いものを「微（安全）」と書かない
+  assert.equal(exposureLabel({ epss: null }), "不明");
+  assert.equal(exposureLabel({}), "不明");
+});
+
+
+test("勧告一覧の見出しはレベルで言い分ける", () => {
+  const advisories = [{ id: "CVE-2026-109618" }, { id: "CVE-2026-109619" }];
+
+  assert.equal(
+    advisoriesSummary(advisories, LEVEL.RED),
+    "影響する勧告 2 件（CVE-2026-109618 ほか）を見る",
+  );
+  assert.equal(
+    advisoriesSummary(advisories, LEVEL.YELLOW),
+    "影響する勧告 2 件（CVE-2026-109618 ほか）を見る",
+  );
+  assert.equal(
+    advisoriesSummary(advisories, LEVEL.GRAY),
+    "関係する勧告 2 件（CVE-2026-109618 ほか）を見る",
+  );
+  // 緑・情報は「もう修正済み」なので CVE を並べない（件数だけ）
+  assert.equal(advisoriesSummary([{ id: "CVE-2025-14180" }], LEVEL.NONE), "過去の勧告 1 件を見る");
+  assert.equal(advisoriesSummary(advisories, LEVEL.INFO), "過去の勧告 2 件を見る");
+});
+
+test("勧告が 1 件のときは「ほか」を付けない", () => {
+  assert.equal(
+    advisoriesSummary([{ id: "CVE-2026-109618" }], LEVEL.RED),
+    "影響する勧告 1 件（CVE-2026-109618）を見る",
+  );
+  assert.equal(advisoriesSummary([], LEVEL.RED), "");
+  assert.equal(advisoriesSummary(null, LEVEL.RED), "");
 });
 

@@ -13,6 +13,8 @@ import html
 import json
 from pathlib import Path
 
+from .advisories import exposure_label, impact_label
+
 DEFAULT_OUT = Path("out")
 
 KIND_LABELS = {
@@ -143,24 +145,22 @@ def _range_text(advisory: dict) -> str | None:
 
 
 def _advisory_line(advisory: dict) -> str:
-    """`CVE-xxxx ｜ 1.4.2 以下が影響 ｜ 1.4.3 で修正 ｜ 深刻度 9.8` のような 1 行。"""
-    parts = []
+    """1 件の勧告。`CVE ｜ 影響する Version` の下に、2 軸の評価を 2 行で置く。"""
     ranges = [str(item) for item in (advisory.get("ranges") or ()) if item]
     range_text = " / ".join(ranges) if ranges else _range_text(advisory)
-    parts.append(f"{_esc(range_text)}が影響" if range_text else "影響する Version は不明")
+    head = f"<code>{_esc(advisory.get('id'))}</code>"
+    head += f" ｜ {_esc(range_text)}が影響" if range_text else " ｜ 影響する Version は不明"
     fixed = advisory.get("fixed")
     # 修正版が範囲から自明（「X より前が影響」なら X が修正版）なときは繰り返さない
     if fixed and fixed not in (advisory.get("affected_below"), advisory.get("affected_upto")):
-        parts.append(f"{_esc(fixed)} で修正")
-    if advisory.get("cvss") is not None:
-        parts.append(f"深刻度 {_esc(advisory['cvss'])}")
+        head += f" ｜ {_esc(fixed)} で修正"
+    exposure = exposure_label(bool(advisory.get("kev")), advisory.get("epss"))
     if advisory.get("kev"):
-        parts.append("<b>実際に悪用あり</b>")
-    epss = advisory.get("epss")
-    if epss is not None and float(epss) >= 0.01:
-        parts.append(f"悪用の可能性 {float(epss) * 100:.0f}%")
-    detail = " ｜ " + " ｜ ".join(parts) if parts else ""
-    return f"<code>{_esc(advisory.get('id'))}</code>{detail}"
+        exposure = f"<b>{exposure}</b>"
+    return (
+        f"{head}<br />"
+        f"攻撃の可能性 {exposure} ｜ 攻撃時の影響度 {_esc(impact_label(advisory.get('cvss')))}"
+    )
 
 
 def _judgement_rows(judgements: list[dict]) -> str:
