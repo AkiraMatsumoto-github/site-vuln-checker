@@ -24,6 +24,23 @@ function evidence(html, url = "https://example.com/") {
 const find = (analysis, kind, name) =>
   analysis.findings.find((item) => item.kind === kind && item.name === name);
 
+test("Shopify のテーマとアプリを読む（Version は出ない）", () => {
+  const analysis = analyze({
+    url: "https://shop.example/",
+    html: '<script>Shopify.theme = {"name":"Dawn","theme_store_id":887};</script>',
+    resources: [
+      "https://static.klaviyo.com/onsite/js/klaviyo.js",
+      "https://cdn.shopify.com/s/files/theme.js",
+    ],
+  });
+  const theme = analysis.findings.find((item) => item.kind === "theme");
+  assert.equal(theme.name, "dawn");
+  assert.equal(theme.version, null, "Shopify のテーマは Version を出さない");
+  const apps = analysis.findings.filter((item) => item.kind === "app").map((item) => item.name);
+  assert.deepEqual(apps, ["klaviyo"]);
+  assert.ok(analysis.notes.some((note) => note.includes("Shopify のサーバー側 Version")));
+});
+
 test("WordPress を判定して根拠を残す", () => {
   const analysis = analyze(evidence(load("wp_home.html")));
   const wordpress = find(analysis, "platform", "wordpress");

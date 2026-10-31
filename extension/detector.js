@@ -87,6 +87,73 @@ export function detectFrameworks(htmlLower) {
   return findings;
 }
 
+/** Shopify のテーマ定義（`Shopify.theme = {"name":"Dawn", ...};`） */
+const SHOPIFY_THEME_RE = /Shopify\.theme\s*=\s*(\{[\s\S]*?\})\s*;/;
+
+/** Shopify アプリの配信ドメイン → 名前（主要なものだけ。判定は名前の可視化まで）。 */
+const SHOPIFY_APP_DOMAINS = [
+  ["klaviyo.com", "klaviyo"],
+  ["judge.me", "judge-me"],
+  ["yotpo.com", "yotpo"],
+  ["gorgias.com", "gorgias"],
+  ["privy.com", "privy"],
+  ["justuno.com", "justuno"],
+  ["stamped.io", "stamped-io"],
+  ["loox.app", "loox"],
+  ["okendo.io", "okendo"],
+  ["rechargeapps.com", "recharge"],
+  ["rebuyengine.com", "rebuy"],
+  ["postscript.io", "postscript"],
+  ["attentive.com", "attentive"],
+  ["smsbump.com", "smsbump"],
+];
+
+function slugify(text) {
+  return String(text)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Shopify のテーマ名と、読み込まれているアプリを推定する。
+ *
+ * Shopify は**サーバー側の Version を公開しない**（常に最新が提供される）ため、
+ * 見えるのは「テーマ名」と「どのアプリのスクリプトが動いているか」まで。
+ */
+export function detectShopify(html, resources) {
+  const findings = [];
+
+  const match = SHOPIFY_THEME_RE.exec(String(html ?? ""));
+  if (match) {
+    let theme = {};
+    try {
+      theme = JSON.parse(match[1]);
+    } catch {
+      theme = {};
+    }
+    const name = String(theme?.name ?? "").trim();
+    if (name) findings.push(finding("theme", slugify(name), null, 0.85, ["dom:Shopify.theme"]));
+  }
+
+  const seen = new Set();
+  for (const url of resources) {
+    let host = "";
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      continue;
+    }
+    for (const [domain, app] of SHOPIFY_APP_DOMAINS) {
+      if (host.endsWith(domain) && !seen.has(app)) {
+        seen.add(app);
+        findings.push(finding("app", app, null, 0.7, [`host:${domain}`]));
+      }
+    }
+  }
+  return findings;
+}
+
 /** プラグイン名として扱う最小文字数（短すぎる slug は前方一致させない）。 */
 export const MIN_PREFIX_MATCH = 6;
 
@@ -261,7 +328,13 @@ export function buildNotes(findings) {
   if (!findings.some((item) => item.kind === "language") && (!platforms.length || isPhpBased)) {
     notes.push("PHP のバージョンは取得できませんでした（分かる場合は入力してください）");
   } else if (platforms.length && !isPhpBased) {
-    notes.push(`このサイトは ${platforms.join("/")} 製です（プラグインや PHP の判定はありません）`);
+    if (platforms.includes("shopify")) {
+      notes.push(
+        "Shopify のサーバー側 Version は公開されません（常に最新が提供されます）。テーマ・アプリ・JS ライブラリのみ表示します",
+      );
+    } else {
+      notes.push(`このサイトは ${platforms.join("/")} 製です（プラグインや PHP の判定はありません）`);
+    }
   }
 
   const frameworks = findings
@@ -285,6 +358,7 @@ export function analyze(evidence) {
     detectCore(generator, resources),
     ...detectPlugins(resources, html),
     ...detectThemes(resources, html),
+    ...detectShopify(html, resources),
     ...detectLibraries(resources),
     ...detectFrameworks(htmlLower),
     ...detectServer(headers),

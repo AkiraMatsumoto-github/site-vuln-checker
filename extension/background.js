@@ -14,11 +14,13 @@ import { AdvisoryIndex, judge, normalizeSlug, summarizeLevels } from "./advisor.
 import { INDEX_CANDIDATES, INDEX_ORIGINS, isIndexStale } from "./config.js";
 import { analyze, buildNotes } from "./detector.js";
 import { originPattern } from "./patterns.js";
+import { parseSiteHealth, siteHealthFindings } from "./sitehealth.js";
 
 const REPORT_KEY = "lastReport";
 const INDEX_KEY = "index";
 const INDEX_URL_KEY = "indexUrl";
 const VERSIONS_KEY = "versions";
+const SITE_HEALTH_KEY = "siteHealth";
 const STATE_VERSION_KEY = "stateVersion";
 const REFRESH_ALARM = "refresh-index";
 
@@ -93,6 +95,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "loadIndex") {
     // 指定 URL から索引を読む（利用者が「調べる」を押した流れで呼ばれる）
     refreshIndex(message.url)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ error: String(error?.message ?? error) }));
+    return true;
+  }
+  if (message?.type === "readSiteHealth") {
+    readSiteHealth()
       .then(sendResponse)
       .catch((error) => sendResponse({ error: String(error?.message ?? error) }));
     return true;
@@ -192,10 +200,20 @@ async function inspectActiveTab() {
     resources: result.resources,
     headers,
   });
-  const { versions } = await readVersions();
+  const { versions, origin } = await readVersions();
+  const analyzeNotes = [...analysis.notes];
   applyVersions(analysis, versions);
+  // 入力と検出が食い違ったときの注記（buildNotes で消えないよう退避する）
+  const versionNotes = analysis.notes.slice(analyzeNotes.length);
+  // サイトヘルス（実測値）があれば最優先で使う
+  const siteHealth = await storedSiteHealth(origin);
+  applySiteHealth(analysis, siteHealth);
   // 入力を反映したあとで「判定できなかったこと」を作り直す（PHP の版が入ったら注意書きを消す）
   analysis.notes = buildNotes(analysis.findings);
+  analysis.notes.push(...versionNotes);
+  if (siteHealth) {
+    analysis.notes.push("PHP などの値は「サイトヘルス」から読み取った実測値です");
+  }
   const indexRefresh = await ensureFreshIndex();
   const index = await loadIndex();
   const judgements = judge(analysis, index);
@@ -279,21 +297,34 @@ async function writeVersion(product, version) {
 }
 
 /**
- * 入力されたバージョンを検出結果に反映する。
+ * 入力された Version を検出結果に反映する。
  *
- * 外からは分からない PHP・フレームワークの版を、利用者自身が入れるための穴埋め。
- * 既に同じ名前の検出結果があれば版を補い、無ければ項目を足す。
+ * **入力は「補完」**として扱う。すでに検出できている値（ヘッダ・サイトヘルス）が
+ * ある場合はそちらを優先し、入力値が違うときは理由を残す（黙って上書きしない）。
  */
 function applyVersions(analysis, versions) {
   for (const [product, version] of Object.entries(versions || {})) {
     if (!version) continue;
     const existing = analysis.findings.find((item) => item.name === product);
+
+    if (existing?.version) {
+      // 検出できている値のほうが信頼できる（入力は補完用）
+      if (existing.version !== version) {
+        analysis.notes.push(
+          `${product}: 検出した Version ${existing.version} を使用しました` +
+            `（入力した ${version} は使いません。入力欄の × で削除できます）`,
+        );
+      }
+      continue;
+    }
+
     if (existing) {
       existing.version = version;
       existing.confidence = 1;
       existing.evidence = [...new Set([...(existing.evidence || []), `input:${product}`])];
       continue;
     }
+
     analysis.findings.push({
       kind: KIND_BY_PRODUCT[product] ?? "framework",
       name: product,
@@ -342,6 +373,89 @@ async function ensureFreshIndex() {
       needsIndexPermission: !granted,
     };
   }
+}
+
+/** サイトヘルスの DOM から「セクション + 表の行」を取り出す（実行はページ内）。 */
+function collectSiteHealth() {
+  const sections = [];
+  for (const table of document.querySelectorAll("table")) {
+    let heading = "";
+    let node = table.previousElementSibling;
+    while (node && !heading) {
+      if (/^H[2-4]$/.test(node.tagName)) heading = node.textContent || "";
+      node = node.previousElementSibling;
+    }
+    if (!heading) {
+      const caption = table.querySelector("caption");
+      heading = caption ? caption.textContent || "" : "";
+    }
+    const rows = [];
+    for (const row of table.querySelectorAll("tr")) {
+      const cells = [...row.children].filter((cell) => cell.tagName === "TD" || cell.tagName === "TH");
+      if (cells.length < 2) continue;
+      rows.push([cells[0].textContent || "", cells[1].textContent || ""]);
+    }
+    if (rows.length) sections.push({ id: heading.trim(), rows });
+  }
+  return sections;
+}
+
+/**
+ * WordPress「ツール → サイトヘルス → 情報」を読む。
+ *
+ * 管理者としてログインしている**本人のサイト**だけ。表示済みの DOM を読むだけで、
+ * 追加のリクエストはしない（企画書 6.4）。
+ */
+async function readSiteHealth() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !/\/wp-admin\/site-health\.php/i.test(tab.url ?? "")) {
+    return { error: "WordPress の「ツール → サイトヘルス → 情報」を開いてから実行してください" };
+  }
+
+  const injected = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: collectSiteHealth,
+  });
+  const sections = injected?.[0]?.result;
+  if (!sections?.length) {
+    return { error: "サイトヘルスの表を読み取れませんでした（画面を開き直してください）" };
+  }
+
+  const info = parseSiteHealth(sections);
+  const origin = originOf(tab.url);
+  if (origin) {
+    const stored = await chrome.storage.local.get(SITE_HEALTH_KEY);
+    const all = stored[SITE_HEALTH_KEY] ?? {};
+    all[origin] = info;
+    await chrome.storage.local.set({ [SITE_HEALTH_KEY]: all });
+  }
+  return { origin, info };
+}
+
+/** サイトヘルスの値で検出結果を上書きする（実測値なので優先する）。 */
+function applySiteHealth(analysis, info) {
+  if (!info) return analysis;
+  for (const item of siteHealthFindings(info)) {
+    const existing = analysis.findings.find(
+      (f) => f.kind === item.kind && normalizeSlug(f.name) === normalizeSlug(item.name),
+    );
+    if (existing) {
+      existing.version = item.version;
+      existing.confidence = item.confidence;
+      existing.evidence = [...new Set([...(existing.evidence ?? []), ...item.evidence])];
+      if (item.active !== null && item.active !== undefined) existing.active = item.active;
+    } else {
+      analysis.findings.push(item);
+    }
+  }
+  return analysis;
+}
+
+/** このサイトのサイトヘルス情報（保存済み）。 */
+async function storedSiteHealth(origin) {
+  if (!origin) return null;
+  const stored = await chrome.storage.local.get(SITE_HEALTH_KEY);
+  return stored[SITE_HEALTH_KEY]?.[origin] ?? null;
 }
 
 async function loadIndex() {

@@ -105,6 +105,22 @@ def test_generator_platform_reads_jekyll() -> None:
     assert any("jekyll" in note for note in analysis.notes)
 
 
+def test_shopify_theme_and_apps() -> None:
+    """Shopify は Version を出さないが、テーマ名とアプリは見える。"""
+    html = (
+        "<html><head>"
+        '<script>Shopify.theme = {"name":"Dawn","id":1,"theme_store_id":887};</script>'
+        '<script src="https://static.klaviyo.com/onsite/js/klaviyo.js"></script>'
+        '<script src="https://cdn.shopify.com/s/files/theme.js"></script>'
+        "</head><body></body></html>"
+    )
+    analysis = analyze("https://shop.example/", html, {})
+    theme = _get(analysis, "theme", "dawn")
+    assert theme.confidence >= 0.8
+    assert [f.name for f in analysis.findings if f.kind == "app"] == ["klaviyo"]
+    assert any("Shopify のサーバー側 Version は公開されません" in n for n in analysis.notes)
+
+
 def test_wordpress_generator_is_not_treated_as_generator_platform() -> None:
     """WordPress は core として扱う（platform の二重計上をしない）。"""
     html = (

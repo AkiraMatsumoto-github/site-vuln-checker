@@ -5,6 +5,15 @@ name: 索引の公開
 
 on:
   workflow_dispatch:
+    inputs:
+      full:
+        description: "前回の索引を使わず、フルで作り直す"
+        type: boolean
+        default: false
+      products:
+        description: "CPE の対象製品（カンマ区切り）"
+        type: string
+        default: "php,wordpress,laravel,symfony,cakephp,django,rails,jekyll"
   schedule:
     # 毎日 18:00 UTC（日本時間 03:00）
     - cron: "0 18 * * *"
@@ -14,13 +23,18 @@ permissions:
   pages: write
   id-token: write
 
+# 実行が重ならないようにする（前の実行は止めない）
+concurrency:
+  group: publish-index
+  cancel-in-progress: false
+
 env:
   INDEX_PATH: out/advisories.json
   TAG: index
 
 jobs:
   publish:
-    name: build & publish
+    name: ビルドと公開
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment:
@@ -38,7 +52,18 @@ jobs:
       - name: Install
         run: uv sync --locked
 
+      - name: NVD の API キー確認
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          if [ -z "${NVD_API_KEY:-}" ]; then
+            echo "::warning::NVD_API_KEY が未設定です（レート制限で非常に遅くなります）"
+          else
+            echo "NVD_API_KEY: 設定済み"
+          fi
+
       - name: 前回の索引を取得（差分更新の土台）
+        if: ${{ inputs.full != true }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -66,7 +91,7 @@ jobs:
           # CPE（PHP 本体・フレームワーク・静的サイト）は毎回取り直して足す。
           # ここを初回だけにすると、後から対象製品を増やしても反映されない。
           uv run svc-ingest --source cpe \
-            --products php,wordpress,laravel,symfony,cakephp,django,rails,jekyll \
+            --products "${{ inputs.products || 'php,wordpress,laravel,symfony,cakephp,django,rails,jekyll' }}" \
             --merge --out "$INDEX_PATH"
 
       - name: 悪用実績・悪用確率・EOL を足す
@@ -92,19 +117,47 @@ jobs:
               sys.exit("EOL 情報がありません")
           PY
 
-      - name: Releases にも置く（履歴・手元ダウンロード用）
+      - name: Releases を更新（毎日の索引 + 日付つきの履歴）
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_DATED: "7"
         run: |
           set -euo pipefail
+          DATE=$(date -u +%Y%m%d)
+          DATED="advisories-$DATE.json"
+          cp "$INDEX_PATH" "out/$DATED"
+
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --latest \
               --title "脆弱性索引（自動更新）" \
               --notes "サイト脆弱性チェッカーが使う索引です。GitHub Actions が毎日更新します。"
           fi
-          gh release upload "$TAG" "$INDEX_PATH" --clobber
-          gh release edit "$TAG" --latest \
-            --notes "更新: $(date -u '+%Y-%m-%d %H:%M UTC') ／ $(du -h "$INDEX_PATH" | cut -f1)"
+
+          gh release upload "$TAG" "$INDEX_PATH" "out/$DATED" --clobber
+
+          # 古い日付つきファイルは直近 KEEP_DATED 件だけ残す
+          gh release view "$TAG" --json assets --jq '.assets[].name' \
+            | grep -E '^advisories-[0-9]{8}\.json$' | sort -r | tail -n +$((KEEP_DATED + 1)) \
+            | while read -r old; do
+                echo "古い履歴を削除: $old"
+                gh release delete-asset "$TAG" "$old" -y || true
+              done
+
+          SUMMARY=$(uv run python - <<'PY'
+          import json, pathlib
+          data = json.loads(pathlib.Path("out/advisories.json").read_text(encoding="utf-8"))
+          advisories = data.get("advisories") or []
+          php = [a for a in advisories if a.get("slug") == "php"]
+          products = (data.get("lifecycles") or {}).get("products") or {}
+          print(f"勧告 {len(advisories)} 件 / PHP 本体 {len(php)} 件 / EOL {len(products)} 製品 / 生成 {data.get('generated_at')}")
+          PY
+          )
+          gh release edit "$TAG" --latest --notes "更新: $(date -u '+%Y-%m-%d %H:%M UTC')
+
+          $SUMMARY
+
+          拡張は GitHub Pages の索引を読みます。ここには同じファイルと日付つきの履歴を置いています。"
+
 
       - name: Pages 用のファイルを用意
         run: |
@@ -130,3 +183,14 @@ jobs:
             echo "$url -> HTTP $code"
             test "$code" = "200"
           done
+
+      - name: 結果をまとめる
+        if: always()
+        run: |
+          {
+            echo "### 索引の公開結果"
+            echo ""
+            echo "- 拡張が読む索引: https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json"
+            echo "- リリース（履歴つき）: https://github.com/${{ github.repository }}/releases/tag/index"
+            echo "- 実行: ${{ github.event_name }}（フル再構築: ${{ inputs.full || false }}）"
+          } >> "$GITHUB_STEP_SUMMARY"

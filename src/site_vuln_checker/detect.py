@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -371,6 +372,60 @@ def _detect_generator_platform(generator: str) -> Finding | None:
     return None
 
 
+#: Shopify のテーマ定義（``Shopify.theme = {"name":"Dawn", ...};``）
+_SHOPIFY_THEME_RE = re.compile(r"Shopify\.theme\s*=\s*(\{.*?\})\s*;", re.S)
+
+#: Shopify アプリの配信ドメイン → 名前。**主要なものだけ**（判定は名前の可視化まで）。
+_SHOPIFY_APP_DOMAINS: tuple[tuple[str, str], ...] = (
+    ("klaviyo.com", "klaviyo"),
+    ("judge.me", "judge-me"),
+    ("yotpo.com", "yotpo"),
+    ("gorgias.com", "gorgias"),
+    ("privy.com", "privy"),
+    ("justuno.com", "justuno"),
+    ("stamped.io", "stamped-io"),
+    ("loox.app", "loox"),
+    ("okendo.io", "okendo"),
+    ("rechargeapps.com", "recharge"),
+    ("rebuyengine.com", "rebuy"),
+    ("postscript.io", "postscript"),
+    ("attentive.com", "attentive"),
+    ("smsbump.com", "smsbump"),
+)
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def _detect_shopify(html: str, resources: list[str]) -> list[Finding]:
+    """Shopify のテーマ名と、読み込まれているアプリを推定する。
+
+    Shopify は **サーバー側の Version を公開しない**（常に最新が提供される）ため、
+    見えるのは「テーマ名」と「どのアプリのスクリプトが動いているか」まで。
+    """
+    findings: list[Finding] = []
+
+    match = _SHOPIFY_THEME_RE.search(html)
+    if match:
+        try:
+            theme = json.loads(match.group(1))
+        except ValueError:
+            theme = {}
+        name = str(theme.get("name") or "").strip()
+        if name:
+            findings.append(Finding("theme", _slug(name), None, 0.85, ("dom:Shopify.theme",)))
+
+    seen: set[str] = set()
+    for url in resources:
+        host = urlparse(url).netloc.lower()
+        for domain, app in _SHOPIFY_APP_DOMAINS:
+            if host.endswith(domain) and app not in seen:
+                seen.add(app)
+                findings.append(Finding("app", app, None, 0.7, (f"host:{domain}",)))
+    return findings
+
+
 def _detect_server(headers: dict[str, str]) -> list[Finding]:
     """``X-Powered-By`` / ``Server`` から PHP と Web サーバを推定する。"""
     findings: list[Finding] = []
@@ -419,6 +474,7 @@ def analyze(url: str, html: str, headers: dict[str, str] | None = None) -> Analy
 
     analysis.findings.extend(_detect_plugins(resources, html))
     analysis.findings.extend(_detect_themes(resources, html))
+    analysis.findings.extend(_detect_shopify(html, resources))
     analysis.findings.extend(_detect_libraries(resources))
     analysis.findings.extend(_detect_frameworks(html_lower))
     analysis.findings.extend(_detect_server(headers))
@@ -438,7 +494,13 @@ def analyze(url: str, html: str, headers: dict[str, str] | None = None) -> Analy
         analysis.notes.append("PHP のバージョンは取得できませんでした（ヘッダ非公開）")
     elif platforms and not (platforms & php_based):
         others = "/".join(sorted(platforms))
-        analysis.notes.append(
-            f"このサイトは {others} 製です（プラグインや PHP の判定はありません）"
-        )
+        if "shopify" in platforms:
+            analysis.notes.append(
+                "Shopify のサーバー側 Version は公開されません（常に最新が提供されます）。"
+                "テーマ・アプリ・JS ライブラリのみ表示します"
+            )
+        else:
+            analysis.notes.append(
+                f"このサイトは {others} 製です（プラグインや PHP の判定はありません）"
+            )
     return analysis

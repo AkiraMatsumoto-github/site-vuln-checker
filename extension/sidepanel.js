@@ -10,9 +10,11 @@ const KIND_LABEL = {
   platform: "基盤",
   core: "コア",
   plugin: "プラグイン",
+  app: "アプリ",
   theme: "テーマ",
   library: "JS",
   language: "言語",
+  framework: "フレームワーク",
   server: "サーバ",
   database: "DB",
 };
@@ -142,6 +144,20 @@ function confidenceLabel(confidence) {
   return "低";
 }
 
+/** 検出の根拠を短い日本語にする（数字だけでは理由が分からないため）。 */
+function evidenceLabel(evidence) {
+  const first = String((evidence ?? [])[0] ?? "");
+  if (first.startsWith("site-health:")) return "サイトヘルス";
+  if (first.startsWith("input:")) return "入力";
+  if (first.startsWith("header:")) return "ヘッダ";
+  if (first.startsWith("meta:")) return "meta";
+  if (first.startsWith("asset:") || first.startsWith("file:")) return "ファイル";
+  if (first.startsWith("path:") || first.startsWith("dom:") || first.startsWith("inline:")) {
+    return "ページ";
+  }
+  return first || "—";
+}
+
 function renderComponents(report) {
   const container = $("components");
   container.replaceChildren();
@@ -154,7 +170,9 @@ function renderComponents(report) {
   const table = element("table");
   const head = element("thead");
   const headRow = element("tr");
-  for (const label of ["種別", "名前", "Version", "検出"]) headRow.append(element("th", "", label));
+  for (const label of ["種別", "名前", "Version", "検出", "根拠"]) {
+    headRow.append(element("th", "", label));
+  }
   head.append(headRow);
 
   const body = element("tbody");
@@ -167,6 +185,7 @@ function renderComponents(report) {
       element("td", "", finding.name),
       element("td", "", finding.version ?? "—"),
       detected,
+      element("td", "", evidenceLabel(finding.evidence)),
     );
     body.append(row);
   }
@@ -510,6 +529,26 @@ async function retryHeaderPermission() {
     : "許可されませんでした（判定は続けられます）";
   await inspect();
 }
+
+/** サイトヘルス（管理画面）を読んで、そのまま判定し直す。 */
+async function readSiteHealth() {
+  $("status").textContent = "サイトヘルスを読んでいます…";
+  const result = await chrome.runtime.sendMessage({ type: "readSiteHealth" }).catch((error) => ({
+    error: String(error?.message ?? error),
+  }));
+  if (result?.error) {
+    $("status").textContent = result.error;
+    return;
+  }
+  $("status").textContent = "サイトヘルスを読み取りました";
+  await inspect();
+}
+
+$("sitehealth").addEventListener("click", () => {
+  readSiteHealth().catch((error) => {
+    $("status").textContent = `失敗しました: ${String(error?.message ?? error)}`;
+  });
+});
 
 $("addVersion").addEventListener("click", () => {
   addVersion().catch((error) => {
