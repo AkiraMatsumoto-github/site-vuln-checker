@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { analyze } from "../detector.js";
+import { SHOPIFY_APP_DOMAINS, analyze } from "../detector.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, "..", "..", "tests", "fixtures");
@@ -39,6 +39,47 @@ test("Shopify のテーマとアプリを読む（Version は出ない）", () =
   const apps = analysis.findings.filter((item) => item.kind === "app").map((item) => item.name);
   assert.deepEqual(apps, ["klaviyo"]);
   assert.ok(analysis.notes.some((note) => note.includes("Shopify のサーバー側 Version")));
+});
+
+test("アプリ辞書は主要アプリを 50 ドメイン以上持つ（レビュー #14）", () => {
+  const domains = SHOPIFY_APP_DOMAINS.map(([domain]) => domain);
+  const apps = new Set(SHOPIFY_APP_DOMAINS.map(([, app]) => app));
+
+  assert.ok(domains.length >= 50, `辞書が少なすぎます: ${domains.length}`);
+  assert.equal(new Set(domains).size, domains.length, "同じドメインを二重に登録しない");
+  assert.ok(apps.size >= 40);
+  for (const expected of ["klaviyo", "omnisend", "judge-me", "smile-io", "weglot"]) {
+    assert.ok(apps.has(expected), `${expected} が辞書に無い`);
+  }
+});
+
+test("CDN のサブドメインでも拾い、同じアプリは 1 回だけ出す", () => {
+  const analysis = analyze({
+    url: "https://shop.example/",
+    html: "",
+    resources: [
+      "https://cdn.omnisrc.com/onsite/js/omnisend.js",
+      "https://static.klaviyo.com/onsite/js/klaviyo.js",
+      "https://a.klaviyo.com/onsite/js/klaviyo.js",
+      "https://cdn.smile.io/smile-ui-latest.js",
+      "https://widget.trustpilot.com/trustbox.js",
+      "https://static.triplewhale.com/pixel.js",
+    ],
+  });
+  const apps = analysis.findings.filter((item) => item.kind === "app").map((item) => item.name);
+  assert.deepEqual(apps.sort(), ["klaviyo", "omnisend", "smile-io", "triple-whale", "trustpilot"]);
+});
+
+test("似た名前の別ドメインをアプリと誤判定しない", () => {
+  const analysis = analyze({
+    url: "https://shop.example/",
+    html: "",
+    resources: ["https://notklaviyo.com/track.js", "https://klaviyo.com.evil.example/x.js"],
+  });
+  assert.deepEqual(
+    analysis.findings.filter((item) => item.kind === "app"),
+    [],
+  );
 });
 
 test("WordPress を判定して根拠を残す", () => {

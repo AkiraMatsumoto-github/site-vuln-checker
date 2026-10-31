@@ -90,23 +90,104 @@ export function detectFrameworks(htmlLower) {
 /** Shopify のテーマ定義（`Shopify.theme = {"name":"Dawn", ...};`） */
 const SHOPIFY_THEME_RE = /Shopify\.theme\s*=\s*(\{[\s\S]*?\})\s*;/;
 
-/** Shopify アプリの配信ドメイン → 名前（主要なものだけ。判定は名前の可視化まで）。 */
-const SHOPIFY_APP_DOMAINS = [
+/**
+ * Shopify アプリの配信ドメイン → 名前（「どのアプリが動いているか」の可視化まで）。
+ *
+ * **アプリの会社のドメイン**を書く（CDN のサブドメインは前方一致で拾える）。
+ * ここに無いアプリは「不明」ではなく**単に出さない**（誤検出より取りこぼしを選ぶ）。
+ * Python 側（`src/site_vuln_checker/detect.py`）と**同じ内容・同じ順**にする。
+ */
+export const SHOPIFY_APP_DOMAINS = [
+  // メール / SMS 配信
   ["klaviyo.com", "klaviyo"],
-  ["judge.me", "judge-me"],
-  ["yotpo.com", "yotpo"],
-  ["gorgias.com", "gorgias"],
-  ["privy.com", "privy"],
-  ["justuno.com", "justuno"],
-  ["stamped.io", "stamped-io"],
-  ["loox.app", "loox"],
-  ["okendo.io", "okendo"],
-  ["rechargeapps.com", "recharge"],
-  ["rebuyengine.com", "rebuy"],
+  ["omnisend.com", "omnisend"],
+  ["omnisrc.com", "omnisend"],
   ["postscript.io", "postscript"],
   ["attentive.com", "attentive"],
+  ["attentivemobile.com", "attentive"],
   ["smsbump.com", "smsbump"],
+  ["privy.com", "privy"],
+  ["justuno.com", "justuno"],
+  ["recart.com", "recart"],
+  ["wisepops.com", "wisepops"],
+  ["getsitecontrol.com", "getsitecontrol"],
+  ["zotabox.com", "zotabox"],
+  // レビュー / 口コミ
+  ["judge.me", "judge-me"],
+  ["yotpo.com", "yotpo"],
+  ["stamped.io", "stamped-io"],
+  ["loox.io", "loox"],
+  ["loox.app", "loox"],
+  ["okendo.io", "okendo"],
+  ["fera.ai", "fera"],
+  ["opinew.com", "opinew"],
+  ["junip.co", "junip"],
+  ["reviews.io", "reviews-io"],
+  ["trustpilot.com", "trustpilot"],
+  ["trustpilot.net", "trustpilot"],
+  // チャット / サポート
+  ["gorgias.com", "gorgias"],
+  ["gorgias.chat", "gorgias"],
+  ["tidio.com", "tidio"],
+  ["tidio.co", "tidio"],
+  ["tawk.to", "tawk-to"],
+  ["reamaze.com", "reamaze"],
+  ["chatra.io", "chatra"],
+  // アップセル / 売上
+  ["rechargeapps.com", "recharge"],
+  ["rebuyengine.com", "rebuy"],
+  ["zipify.com", "zipify"],
+  ["reconvert.io", "reconvert"],
+  ["kiwisizing.com", "kiwi-sizing"],
+  ["boldapps.net", "bold"],
+  ["boldcommerce.com", "bold"],
+  ["hextom.com", "hextom"],
+  ["secomapp.com", "secomapp"],
+  ["avada.io", "avada"],
+  ["fireapps.io", "fireapps"],
+  // ロイヤルティ / 紹介
+  ["smile.io", "smile-io"],
+  ["loyaltylion.com", "loyaltylion"],
+  ["referralcandy.com", "referralcandy"],
+  ["tapfiliate.com", "tapfiliate"],
+  ["refersion.com", "refersion"],
+  ["growave.io", "growave"],
+  ["swym.it", "swym"],
+  // 配送 / 追跡
+  ["aftership.com", "aftership"],
+  ["parcelpanel.com", "parcelpanel"],
+  ["track123.com", "track123"],
+  // 翻訳
+  ["weglot.com", "weglot"],
+  ["langify-app.com", "langify"],
+  // ページビルダー / 検索・レコメンド
+  ["pagefly.io", "pagefly"],
+  ["gempages.net", "gem-pages"],
+  ["searchanise.com", "searchanise"],
+  ["boostcommerce.net", "boost-commerce"],
+  ["klevu.com", "klevu"],
+  ["clerk.io", "clerk-io"],
+  ["fastsimon.com", "fast-simon"],
+  ["nosto.com", "nosto"],
+  // 埋め込みウィジェット
+  ["powr.io", "powr"],
+  ["elfsight.com", "elfsight"],
+  ["globosoftware.net", "globo"],
+  // 分析 / アトリビューション
+  ["triplewhale.com", "triple-whale"],
+  ["getelevar.com", "elevar"],
+  ["northbeam.io", "northbeam"],
 ];
+
+/**
+ * `cdn.klaviyo.com` は一致、`notklaviyo.com` は**一致させない**。
+ *
+ * `host.endsWith(domain)` だけだと、別会社の `notklaviyo.com` を klaviyo と
+ * 誤って表示してしまう（ドメインの区切りを必ず見る）。
+ */
+export function hostMatches(host, domain) {
+  return host === domain || host.endsWith(`.${domain}`);
+}
 
 function slugify(text) {
   return String(text)
@@ -145,7 +226,8 @@ export function detectShopify(html, resources) {
       continue;
     }
     for (const [domain, app] of SHOPIFY_APP_DOMAINS) {
-      if (host.endsWith(domain) && !seen.has(app)) {
+      if (seen.has(app)) continue;
+      if (hostMatches(host, domain)) {
         seen.add(app);
         findings.push(finding("app", app, null, 0.7, [`host:${domain}`]));
       }

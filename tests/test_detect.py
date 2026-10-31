@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from site_vuln_checker.detect import Analysis, analyze
+from site_vuln_checker.detect import SHOPIFY_APP_DOMAINS, Analysis, analyze
 
 FIXTURES = Path(__file__).parent / "fixtures"
 HEADERS = {"x-powered-by": "PHP/8.1.27", "server": "nginx/1.27.3"}
@@ -119,6 +119,59 @@ def test_shopify_theme_and_apps() -> None:
     assert theme.confidence >= 0.8
     assert [f.name for f in analysis.findings if f.kind == "app"] == ["klaviyo"]
     assert any("Shopify のサーバー側 Version は公開されません" in n for n in analysis.notes)
+
+
+def test_shopify_app_dictionary_covers_major_apps() -> None:
+    """アプリ辞書は主要アプリを 50 ドメイン以上持つ（レビュー #14）。
+
+    同じアプリが CDN ごとに複数ドメインを持つことはあるが、
+    **同じドメインを二重に登録しない**（表示が重複する原因になる）。
+    """
+    domains = [domain for domain, _ in SHOPIFY_APP_DOMAINS]
+    apps = {app for _, app in SHOPIFY_APP_DOMAINS}
+
+    assert len(domains) >= 50
+    assert len(domains) == len(set(domains)), "同じドメインを二重に登録しない"
+    assert len(apps) >= 40
+    for expected in ("klaviyo", "omnisend", "judge-me", "smile-io", "weglot", "triple-whale"):
+        assert expected in apps
+
+
+def test_shopify_apps_are_detected_from_multiple_hosts() -> None:
+    """CDN のサブドメインでも拾い、1 アプリは 1 回だけ出す。"""
+    html = (
+        "<html><head>"
+        '<script src="https://cdn.omnisrc.com/onsite/js/omnisend.js"></script>'
+        '<script src="https://static.klaviyo.com/onsite/js/klaviyo.js"></script>'
+        '<script src="https://a.klaviyo.com/onsite/js/klaviyo.js"></script>'
+        '<script src="https://cdn.smile.io/smile-ui-latest.js"></script>'
+        '<script src="https://widget.trustpilot.com/trustbox.js"></script>'
+        '<script src="https://static.triplewhale.com/pixel.js"></script>'
+        "</head><body></body></html>"
+    )
+    analysis = analyze("https://shop.example/", html, {})
+
+    assert sorted(f.name for f in analysis.findings if f.kind == "app") == [
+        "klaviyo",
+        "omnisend",
+        "smile-io",
+        "triple-whale",
+        "trustpilot",
+    ], "同じアプリは CDN が複数でも 1 回だけ出す"
+
+
+def test_lookalike_domain_is_not_mistaken_for_an_app() -> None:
+    """``notklaviyo.com`` のような別ドメインを klaviyo と誤判定しない。"""
+    html = (
+        "<html><head>"
+        '<script src="https://notklaviyo.com/track.js"></script>'
+        '<script src="https://klaviyo.com.evil.example/x.js"></script>'
+        "</head><body></body></html>"
+    )
+    analysis = analyze("https://shop.example/", html, {})
+
+    assert [f.name for f in analysis.findings if f.kind == "app"] == []
+
 
 
 def test_wordpress_generator_is_not_treated_as_generator_platform() -> None:

@@ -20,6 +20,7 @@ KIND_LABELS = {
     "core": "コア",
     "plugin": "プラグイン",
     "theme": "テーマ",
+    "app": "アプリ",
     "library": "JS ライブラリ",
     "language": "言語",
     "server": "サーバ",

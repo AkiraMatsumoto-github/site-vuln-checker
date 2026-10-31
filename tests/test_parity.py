@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from site_vuln_checker.advisories import judge
-from site_vuln_checker.detect import Analysis, Finding
+from site_vuln_checker.detect import SHOPIFY_APP_DOMAINS, Analysis, Finding
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "extension" / "tests" / "parity_runner.mjs"
@@ -143,6 +143,27 @@ def test_js_and_python_judge_agree() -> None:
         check=True,
     )
     js_results = json.loads(completed.stdout)
+    cases = js_results["cases"]
 
     for index, case in enumerate(CASES):
-        assert js_results[index] == _python_results(case), f"ケース {index} で判定が違います"
+        assert cases[index] == _python_results(case), f"ケース {index} で判定が違います"
+
+
+@pytest.mark.skipif(NODE is None, reason="Node が無い環境ではスキップ（CI では実行）")
+def test_shopify_app_dictionary_is_identical() -> None:
+    """Shopify アプリの辞書が Python と JavaScript で**同じ内容・同じ順**か。
+
+    片方だけ足すと「拡張では出るのに CLI では出ない」が起きるため、辞書そのものを
+    突き合わせる（レビュー #14）。
+    """
+    completed = subprocess.run(
+        [NODE, str(RUNNER)],
+        input=json.dumps({"index": INDEX, "today": TODAY, "cases": []}),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    js_domains = [tuple(pair) for pair in json.loads(completed.stdout)["shopifyDomains"]]
+    assert js_domains == list(SHOPIFY_APP_DOMAINS)
+    assert len(js_domains) >= 50

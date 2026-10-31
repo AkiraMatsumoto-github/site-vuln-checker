@@ -200,7 +200,7 @@ PHP 8.1.27 のサイトを調べ、バージョンに `8.1.27` を入力した�
 
 ```
 extension/                     Chrome 拡張（ビルド不要）
-  detector.js                  部品とバージョンの推定
+  detector.js                  部品とバージョンの推定（Shopify はアプリ名 62 種も）
   advisor.js                   索引との照合と赤 / 黄 / 緑 / 情報 / 不明
   background.js                タブの情報収集 → 判定 → アイコンの色
   sidepanel.html / .js         結果の表示（設定画面はありません）
@@ -232,7 +232,7 @@ uv run svc-sitehealth --html site-health.html --json
 ```
 
 判定ロジックは Python と JavaScript の**二重実装**ですが、**同じテストデータで同じ結果**になることを
-固定しています（Python 128 件 / JavaScript 45 件）。とくに `tests/test_parity.py` は、**同じ索引・同じ入力を
+固定しています（Python 132 件 / JavaScript 48 件）。とくに `tests/test_parity.py` は、**同じ索引・同じ入力を
 両方に通して `level` / `action` / `note` / 影響する Version が一致するか**を機械的に突き合わせます。
 
 ## インストール
@@ -367,8 +367,9 @@ setx NVD_API_KEY "取得したキー"     # 以後ずっと（新しいターミ
 <details>
 <summary>WordPress 以外のサイトは対応していますか？</summary>
 
-いまは WordPress のサイトだけです。Shopify は「読み込まれている JavaScript ライブラリ」までを
-今後対応します。サービスのサーバー側（アプリのバージョンなど）は外部から見えないため対象外です。
+いまは WordPress のサイトだけです。Shopify は「読み込まれている JavaScript ライブラリ」と
+「どのアプリのスクリプトが動いているか（名前だけ）」までを表示します。
+アプリのバージョンや脆弱性は外部から見えないため判定しません。
 </details>
 
 <details>

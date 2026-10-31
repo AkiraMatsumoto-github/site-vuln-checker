@@ -6,6 +6,7 @@
 import { readFileSync } from "node:fs";
 
 import { AdvisoryIndex, judge } from "../advisor.js";
+import { SHOPIFY_APP_DOMAINS } from "../detector.js";
 
 const input = JSON.parse(readFileSync(0, "utf8"));
 const index = AdvisoryIndex.fromJSON(input.index);
@@ -25,4 +26,10 @@ const results = (input.cases ?? []).map((findings) =>
   })),
 );
 
-process.stdout.write(JSON.stringify(results));
+process.stdout.write(
+  JSON.stringify({
+    cases: results,
+    // アプリ辞書が Python と食い違わないように、辞書そのものも返す（レビュー #14）
+    shopifyDomains: SHOPIFY_APP_DOMAINS,
+  }),
+);
