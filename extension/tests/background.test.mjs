@@ -124,7 +124,7 @@ function storageArea(store) {
 
 globalThis.chrome = {
   runtime: {
-    getManifest: () => ({ version: "0.4.5" }),
+    getManifest: () => ({ version: "1.0.0" }),
     onInstalled: { addListener() {} },
     onMessage: {
       addListener(fn) {

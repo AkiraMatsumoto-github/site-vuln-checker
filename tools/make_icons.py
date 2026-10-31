@@ -1,7 +1,7 @@
 """拡張のアイコン（PNG）を生成する。
 
 デザイン: 判定 UI に合わせた**信号機**（赤・黄・緑）。
-- 角丸の濃い背景に、3 つのランプを縦に並べる
+- 角丸の濃い背景に、3 つのランプを**横一列**に並べる
 - 16px でも判別できるよう、要素を大きく・余白を広めに取る
 
 使い方::
@@ -25,8 +25,10 @@ BACKGROUND = (31, 41, 55, 255)  # #1f2937
 RED = (229, 62, 62, 255)  # #e53e3e
 YELLOW = (214, 158, 46, 255)  # #d69e2e
 GREEN = (56, 161, 105, 255)  # #38a169
-#: 各ランプの中心（上から赤・黄・緑）。SUPER 基準の比率
-LAMPS = ((RED, 0.28), (YELLOW, 0.50), (GREEN, 0.72))
+#: 各ランプ（左から赤・黄・緑）。中心の x 座標を SUPER 基準の比率で持つ
+LAMPS = ((RED, 0.26), (YELLOW, 0.50), (GREEN, 0.74))
+#: ランプの半径（比率）。0.12 を超えると隣とくっつくので 0.105 にする
+LAMP_RADIUS = 0.105
 
 
 def _rounded_alpha(px: float, py: float, size: int, radius: float) -> bool:
@@ -37,11 +39,11 @@ def _rounded_alpha(px: float, py: float, size: int, radius: float) -> bool:
 
 
 def render_super() -> list[tuple[int, int, int, int]]:
-    """SUPER x SUPER の RGBA を描く。"""
+    """SUPER x SUPER の RGBA を描く（ランプは横一列）。"""
     size = SUPER
     radius = size * 0.22
-    lamp_radius = size * 0.115
-    center_x = size / 2
+    lamp_radius = size * LAMP_RADIUS
+    center_y = size / 2
 
     pixels: list[tuple[int, int, int, int]] = []
     for y in range(size):
@@ -53,8 +55,8 @@ def render_super() -> list[tuple[int, int, int, int]]:
 
             color = BACKGROUND
             for lamp_color, ratio in LAMPS:
-                cy = size * ratio
-                if (px - center_x) ** 2 + (py - cy) ** 2 <= lamp_radius**2:
+                cx = size * ratio
+                if (px - cx) ** 2 + (py - center_y) ** 2 <= lamp_radius**2:
                     color = lamp_color
                     break
             pixels.append(color)
