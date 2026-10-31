@@ -21,6 +21,20 @@ test("操作ボタンは「調べる」1 つだけ（画面ごとに分けない
   assert.doesNotMatch(html, /id="sitehealth"/, "サイトヘルス専用のボタンは置かない");
 });
 
+test("手入力は <details> で畳み、許可リンクは折りたたみの外に置く", () => {
+  const details = /<details class="versions">([\s\S]*?)<\/details>/.exec(html);
+  assert.ok(details, "バージョン入力が details になっていない");
+
+  // 既定では閉じておく（利用者は版を知らないことが多い）
+  assert.match(details[0], /<summary>[^<]*開発者向け/, "summary が開発者向けになっていない");
+  assert.match(details[1], /id="product"/);
+  assert.match(details[1], /id="addVersion"/);
+
+  // 「もう一度許可を求める」は畳んだままだと見えないので、外に出す
+  assert.doesNotMatch(details[1], /id="grantHeaders"/, "許可リンクが折りたたみの中にある");
+  assert.match(html, /id="grantHeaders"/, "許可リンクが消えている");
+});
+
 test("古い版で判定した結果は復元しない（リロード直後の誤解を防ぐ）", () => {
   assert.match(sidepanel, /report\.extensionVersion/, "結果の版を見ていない");
   assert.match(

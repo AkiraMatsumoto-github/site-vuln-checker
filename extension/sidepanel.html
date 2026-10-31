@@ -17,10 +17,11 @@
       <p id="status" class="status" role="status"></p>
     </header>
 
-    <section class="versions">
-      <h2>バージョンを入力（任意）</h2>
+    <details class="versions">
+      <summary>バージョンを入力（任意・開発者向け）</summary>
       <p class="hint">
         外からは分からない PHP やフレームワークの版を入れると、サポート終了と脆弱性を判定できます。
+        版が分からなければ、そのままで大丈夫です（自分のサイトなら「サイトヘルス」から自動で読み取ります）。
       </p>
       <div class="row">
         <select id="product" aria-label="製品">
@@ -37,12 +38,13 @@
         <button id="addVersion" type="button">追加</button>
       </div>
       <ul id="versionList" class="chips"></ul>
-      <p class="hint">
-        サイトが PHP の版を公開している場合だけ読めます（実測 10%）。初回のチェック時に、このサイトへの
-        アクセス許可を求めます（拒否しても判定できます）。
-        <button id="grantHeaders" type="button" class="link" hidden>もう一度許可を求める</button>
-      </p>
-    </section>
+    </details>
+
+    <p class="hint">
+      サイトが PHP の版を公開している場合だけ読めます（実測 10%）。初回のチェック時に、このサイトへの
+      アクセス許可を求めます（拒否しても判定できます）。
+      <button id="grantHeaders" type="button" class="link" hidden>もう一度許可を求める</button>
+    </p>
 
     <main id="result" hidden>
       <section>
