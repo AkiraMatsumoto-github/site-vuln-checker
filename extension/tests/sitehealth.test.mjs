@@ -65,7 +65,7 @@ test("findings へ変換すると サイトヘルス根拠・確度 1 になる"
   const php = findings.find((item) => item.kind === "language");
   assert.equal(php.name, "php");
   assert.equal(php.version, "8.1.31");
-  assert.equal(php.confidence, 1);
+  assert.equal(php.versionConfidence, 1, "実測値なので確定扱い");
   assert.deepEqual(php.evidence, ["site-health:wp-server"]);
 
   const core = findings.find((item) => item.kind === "core");

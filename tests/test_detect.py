@@ -26,7 +26,8 @@ def _get(analysis: Analysis, kind: str, name: str):
 def test_platform_wordpress() -> None:
     analysis = analyze("https://example.com/", _load("wp_home.html"), HEADERS)
     wp = _get(analysis, "platform", "wordpress")
-    assert wp.confidence >= 0.9
+    # 技術の確度は持たない（二値）。根拠が複数あることだけ確認する
+    assert len(wp.evidence) >= 2
     assert "meta:generator" in wp.evidence
     assert "path:/wp-content/" in wp.evidence
 
@@ -35,7 +36,7 @@ def test_core_version_from_generator() -> None:
     analysis = analyze("https://example.com/", _load("wp_home.html"), HEADERS)
     core = _get(analysis, "core", "wordpress")
     assert core.version == "6.8.2"
-    assert core.confidence == 1.0
+    assert core.version_confidence == 1.0
     assert core.evidence == ("meta:generator",)
 
 
@@ -50,7 +51,7 @@ def test_core_ignores_bundled_jquery_version() -> None:
     analysis = analyze("https://example.com/", html, {})
     core = _get(analysis, "core", "wordpress")
     assert core.version == "6.8.2"
-    assert core.confidence == 0.85
+    assert core.version_confidence == 0.75, "?ver= の最頻値は間接証拠"
 
 
 def test_plugins_with_and_without_version() -> None:
@@ -59,12 +60,12 @@ def test_plugins_with_and_without_version() -> None:
 
     cf7 = _get(analysis, "plugin", "contact-form-7")
     assert cf7.version == "5.9.8"
-    assert cf7.confidence == 0.85
+    assert cf7.version_confidence == 0.6, "?ver= は作者が任意の値を入れられるので中程度"
     assert cf7.active is True
 
     woo = _get(analysis, "plugin", "woocommerce")
     assert woo.version is None, "バージョンが取れないときは推測で埋めない"
-    assert woo.confidence < 0.85
+    assert woo.version_confidence == 0, "版が取れないので 0"
 
 
 def test_theme_and_libraries() -> None:
@@ -81,7 +82,7 @@ def test_php_and_server_from_headers() -> None:
     analysis = analyze("https://example.com/", _load("wp_home.html"), HEADERS)
     php = _get(analysis, "language", "php")
     assert php.version == "8.1.27"
-    assert php.confidence == 0.6, "ヘッダ由来は書き換えられることがあるので確度を下げる"
+    assert php.version_confidence == 0.6, "ヘッダ由来は書き換えられることがあるので確度を下げる"
     assert _get(analysis, "server", "nginx").version == "1.27.3"
 
 
@@ -99,7 +100,7 @@ def test_generator_platform_reads_jekyll() -> None:
     analysis = analyze("https://example.com/", html, {"server": "cloudflare"})
     platform = _get(analysis, "platform", "jekyll")
     assert platform.version == "4.4.1"
-    assert platform.confidence >= 0.9
+    assert platform.version_confidence == 1.0, "generator の自己申告は確定扱い"
     # 静的サイトなので「PHP のバージョンが不明」とは言わない
     assert not any("PHP のバージョン" in note for note in analysis.notes)
     assert any("jekyll" in note for note in analysis.notes)
@@ -116,7 +117,7 @@ def test_shopify_theme_and_apps() -> None:
     )
     analysis = analyze("https://shop.example/", html, {})
     theme = _get(analysis, "theme", "dawn")
-    assert theme.confidence >= 0.8
+    assert theme.version is None, "Shopify のテーマは版を出さない"
     assert [f.name for f in analysis.findings if f.kind == "app"] == ["klaviyo"]
     assert any("Shopify のサーバー側 Version は公開されません" in n for n in analysis.notes)
 

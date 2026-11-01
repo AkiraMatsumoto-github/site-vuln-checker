@@ -128,8 +128,14 @@ function renderJudgements(report) {
 }
 
 /** 検出の確かさ（数値は判断に使えないので 高/中/低 で出す）。 */
-function confidenceLabel(confidence) {
-  const value = Number(confidence ?? 0);
+/**
+ * 版の確かさ（高 / 中 / 低）。Version が取れていなければ「—」。
+ *
+ * 「その技術が使われているか」は二値（検出した / しない）で、根拠の列で示す。
+ */
+function accuracyLabel(versionConfidence, hasVersion) {
+  if (!hasVersion) return "—";
+  const value = Number(versionConfidence ?? 0);
   if (value >= 0.8) return "高";
   if (value >= 0.5) return "中";
   return "低";
@@ -161,7 +167,7 @@ function renderComponents(report) {
   const table = element("table");
   const head = element("thead");
   const headRow = element("tr");
-  for (const label of ["種別", "名前", "Version", "検出", "根拠"]) {
+  for (const label of ["種別", "名前", "Version", "精度", "根拠"]) {
     headRow.append(element("th", "", label));
   }
   head.append(headRow);
@@ -169,13 +175,19 @@ function renderComponents(report) {
   const body = element("tbody");
   for (const finding of findings) {
     const row = element("tr");
-    const detected = element("td", "", confidenceLabel(finding.confidence));
-    detected.title = `検出の確かさ ${Number(finding.confidence ?? 0).toFixed(2)}`;
+    const accuracy = element(
+      "td",
+      "",
+      accuracyLabel(finding.versionConfidence, Boolean(finding.version)),
+    );
+    accuracy.title = finding.version
+      ? `版の確かさ ${Number(finding.versionConfidence ?? 0).toFixed(2)}`
+      : "Version が取れていません";
     row.append(
       element("td", "", KIND_LABEL[finding.kind] ?? finding.kind),
       element("td", "", finding.name),
       element("td", "", finding.version ?? "—"),
-      detected,
+      accuracy,
       element("td", "", evidenceLabel(finding.evidence)),
     );
     body.append(row);
@@ -186,7 +198,7 @@ function renderComponents(report) {
     element(
       "p",
       "empty",
-      "Version が「—」のものは、製品は判定できたが Version が取れなかったものです。「検出」はその製品だと判定できた確かさ（高 / 中 / 低）です。",
+      "Version が「—」のものは、製品は判定できたが Version が取れなかったものです。「精度」はその Version が正しい確かさ（高 / 中 / 低）です。",
     ),
   );
 }

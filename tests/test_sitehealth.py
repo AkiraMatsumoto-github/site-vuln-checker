@@ -64,7 +64,7 @@ def test_slug_and_findings() -> None:
 
     findings = {f.key: f for f in info.to_findings()}
     assert findings["language:php"].version == "8.1.31"
-    assert findings["language:php"].confidence >= 0.95, "Site Health 由来は確定扱い"
+    assert findings["language:php"].version_confidence == 1.0, "Site Health は実測値なので確定扱い"
     assert findings["plugin:contact-form-7"].version == "5.9.8"
     assert findings["plugin:contact-form-7"].active is True
     assert findings["plugin:hello-dolly"].active is False

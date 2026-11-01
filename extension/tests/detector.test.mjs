@@ -86,7 +86,8 @@ test("WordPress を判定して根拠を残す", () => {
   const analysis = analyze(evidence(load("wp_home.html")));
   const wordpress = find(analysis, "platform", "wordpress");
   assert.ok(wordpress, "platform:wordpress が見つからない");
-  assert.ok(wordpress.confidence >= 0.9);
+  // 技術の確度は持たない（二値）。根拠が複数あることだけ確認する
+  assert.ok(wordpress.evidence.length >= 2);
   assert.ok(wordpress.evidence.includes("path:/wp-content/"));
 });
 
@@ -94,7 +95,7 @@ test("コアのバージョンは meta generator から取る", () => {
   const analysis = analyze(evidence(load("wp_home.html")));
   const core = find(analysis, "core", "wordpress");
   assert.equal(core.version, "6.8.2");
-  assert.equal(core.confidence, 1.0);
+  assert.equal(core.versionConfidence, 1.0);
   assert.deepEqual(core.evidence, ["meta:generator"]);
 });
 
@@ -105,12 +106,12 @@ test("プラグインは slug と版を返し、版が無ければ null", () => 
 
   const cf7 = find(analysis, "plugin", "contact-form-7");
   assert.equal(cf7.version, "5.9.8");
-  assert.equal(cf7.confidence, 0.85);
+  assert.equal(cf7.versionConfidence, 0.6);
   assert.equal(cf7.active, true);
 
   const woo = find(analysis, "plugin", "woocommerce");
   assert.equal(woo.version, null, "版が取れないときは推測で埋めない");
-  assert.ok(woo.confidence < 0.85);
+  assert.equal(woo.versionConfidence, 0, "版が取れないので 0");
 });
 
 test("テーマと JS ライブラリ", () => {
@@ -128,7 +129,7 @@ test("同梱 jQuery の ?ver をコア版と誤認しない", () => {
   </body></html>`;
   const core = find(analyze(evidence(html)), "core", "wordpress");
   assert.equal(core.version, "6.8.2");
-  assert.equal(core.confidence, 0.85);
+  assert.equal(core.versionConfidence, 0.75);
 });
 
 test("同じ slug に複数の ?ver があるときは最頻値", () => {

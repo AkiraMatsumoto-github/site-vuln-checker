@@ -102,7 +102,7 @@ def _python_results(case: list[dict]) -> list[dict]:
             kind=item["kind"],
             name=item["name"],
             version=item["version"],
-            confidence=item.get("confidence", 0.0),
+            version_confidence=item.get("confidence", 0.0),
         )
         for item in case
     ]

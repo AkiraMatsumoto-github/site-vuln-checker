@@ -49,7 +49,7 @@ const plugin = (name, version, active = true) => ({
   kind: "plugin",
   name,
   version,
-  confidence: 0.85,
+  versionConfidence: 0.6,
   evidence: [],
   active,
 });
@@ -149,7 +149,7 @@ test("入力された Version は、該当情報が無くても必ず表示す�
       kind: "language",
       name: "php",
       version: "9.9.9",
-      confidence: 1,
+      versionConfidence: 1,
       evidence: ["input:php"],
       active: null,
       entered: true,
@@ -264,7 +264,7 @@ const LIFECYCLE_INDEX = {
 };
 
 function language(name, version) {
-  return { kind: "language", name, version, confidence: 1, evidence: [`input:${name}`], active: null };
+  return { kind: "language", name, version, versionConfidence: 1, evidence: [`input:${name}`], active: null };
 }
 
 test("ライフサイクルを索引から読む（製品名でも引ける）", () => {

@@ -3,7 +3,8 @@
 方針（docs/proposal.md 6.1 / 8.1）:
 
 - **L1 パッシブ**。すでに読み込まれた HTML とリソース URL だけを見る。追加リクエストはしない。
-- 判定は必ず「推定」。 :class:`Finding` は ``confidence`` と ``evidence`` を持つ。
+- 判定は必ず「推定」。 :class:`Finding` は ``version_confidence``（版の確かさ）と
+  ``evidence`` を持つ。
 - バージョンが取れないものは ``version=None`` のまま返す（推測で埋めない）。
   これは「バージョン未特定を緑にしない」という企画の鉄則（7.6）に対応する。
 """
@@ -51,14 +52,16 @@ class Finding:
         ``language`` / ``server``
     :param name: 正規化した名前（WordPress なら ``wordpress``、プラグインなら slug）
     :param version: 推定バージョン。取れなければ ``None``
-    :param confidence: 0.0〜1.0。6.2 の重み付けに対応
+    :param version_confidence: **その版が正しい確かさ**（0.0〜1.0）。版が無ければ 0。
+        「その技術が使われているか」は**二値**（検出した / しない）で、根拠 ``evidence`` で示す
     :param evidence: 判定の根拠（``meta:generator``、``asset:?ver=5.9.8`` など）
+    :param active: 読み込まれている（True）、停止中（False）、本文に文字列だけ（None）
     """
 
     kind: str
     name: str
     version: str | None = None
-    confidence: float = 0.0
+    version_confidence: float = 0.0
     evidence: tuple[str, ...] = ()
     active: bool | None = None
 
@@ -71,7 +74,7 @@ class Finding:
             "kind": self.kind,
             "name": self.name,
             "version": self.version,
-            "confidence": round(self.confidence, 2),
+            "version_confidence": round(self.version_confidence, 2),
             "evidence": list(self.evidence),
             "active": self.active,
         }
@@ -178,7 +181,6 @@ def _detect_platforms(
         Finding(
             kind="platform",
             name=name,
-            confidence=min(0.99, 0.7 + 0.1 * len(items)),
             evidence=tuple(items),
         )
         for name, items in evidence.items()
@@ -211,7 +213,7 @@ def _detect_core(generator: str, resources: list[str]) -> Finding | None:
     ]
     if versions:
         ver = Counter(versions).most_common(1)[0][0]
-        return Finding("core", "wordpress", ver, 0.85, (f"asset:wp-includes?ver={ver}",))
+        return Finding("core", "wordpress", ver, 0.75, (f"asset:wp-includes?ver={ver}",))
     return None
 
 
@@ -252,11 +254,11 @@ def _detect_plugins(resources: list[str], html: str) -> list[Finding]:
             ver = Counter(versions).most_common(1)[0][0]
             findings.append(
                 Finding(
-                    "plugin", slug, ver, 0.85, (*unique[:1], f"asset:?ver={ver}"), active=active
+                    "plugin", slug, ver, 0.6, (*unique[:1], f"asset:?ver={ver}"), active=active
                 )
             )
         else:
-            findings.append(Finding("plugin", slug, None, 0.6, unique, active=active))
+            findings.append(Finding("plugin", slug, None, 0.0, unique, active=active))
     return sorted(findings, key=lambda f: f.name)
 
 
@@ -281,7 +283,7 @@ def _detect_themes(resources: list[str], html: str) -> list[Finding]:
     for slug, items in evidence.items():
         ver = versions.get(slug)
         findings.append(
-            Finding("theme", slug, ver, 0.5 if ver else 0.35, tuple(dict.fromkeys(items)))
+            Finding("theme", slug, ver, 0.4 if ver else 0.0, tuple(dict.fromkeys(items)))
         )
     return sorted(findings, key=lambda f: f.name)
 
@@ -300,10 +302,10 @@ def _detect_libraries(resources: list[str]) -> list[Finding]:
             else:
                 ver = _query_version(url)
                 finding = Finding(
-                    "library", lib, ver, 0.85 if ver else 0.7, (f"asset:{_basename(url)}",)
+                    "library", lib, ver, 0.6 if ver else 0.0, (f"asset:{_basename(url)}",)
                 )
             existing = found.get(lib)
-            if existing is None or finding.confidence > existing.confidence:
+            if existing is None or finding.version_confidence > existing.version_confidence:
                 found[lib] = finding
             break
     return sorted(found.values(), key=lambda f: f.name)
@@ -315,17 +317,18 @@ def _detect_frameworks(html_lower: str) -> list[Finding]:
     外部から見えるのは**フレームワークが出力する目印**だけ。版は分からないことが
     多いため、確定できない場合は不明のままにする（拡張では手入力で補える）。
     """
-    signals: tuple[tuple[str, tuple[str, ...], float], ...] = (
-        ("django", ("csrfmiddlewaretoken",), 0.6),
-        ("rails", ('name="authenticity_token"', 'content="authenticity_token"'), 0.6),
-        ("laravel", ("laravel_session", "laravel/framework"), 0.5),
-        ("nuxt", ("__nuxt__",), 0.6),
+    signals: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("django", ("csrfmiddlewaretoken",)),
+        ("rails", ('name="authenticity_token"', 'content="authenticity_token"')),
+        ("laravel", ("laravel_session", "laravel/framework")),
+        ("nuxt", ("__nuxt__",)),
     )
     findings: list[Finding] = []
-    for name, needles, confidence in signals:
+    for name, needles in signals:
         matched = tuple(f"dom:{needle}" for needle in needles if needle in html_lower)
         if matched:
-            findings.append(Finding("framework", name, None, confidence, matched))
+            # 版は取れない（目印だけ）ので version_confidence は 0
+            findings.append(Finding("framework", name, None, 0.0, matched))
     return findings
 
 
@@ -367,7 +370,7 @@ def _detect_generator_platform(generator: str) -> Finding | None:
     for needle, slug in _GENERATOR_PLATFORMS:
         if needle in name:
             return Finding(
-                "platform", slug, version, 0.95 if version else 0.8, ("meta:generator",)
+                "platform", slug, version, 1.0 if version else 0.0, ("meta:generator",)
             )
     return None
 
@@ -493,7 +496,7 @@ def _detect_shopify(html: str, resources: list[str]) -> list[Finding]:
             theme = {}
         name = str(theme.get("name") or "").strip()
         if name:
-            findings.append(Finding("theme", _slug(name), None, 0.85, ("dom:Shopify.theme",)))
+            findings.append(Finding("theme", _slug(name), None, 0.0, ("dom:Shopify.theme",)))
 
     seen: set[str] = set()
     for url in resources:
@@ -503,7 +506,7 @@ def _detect_shopify(html: str, resources: list[str]) -> list[Finding]:
                 continue
             if _host_matches(host, domain):
                 seen.add(app)
-                findings.append(Finding("app", app, None, 0.7, (f"host:{domain}",)))
+                findings.append(Finding("app", app, None, 0.0, (f"host:{domain}",)))
     return findings
 
 
@@ -525,7 +528,7 @@ def _detect_server(headers: dict[str, str]) -> list[Finding]:
             )
         else:
             findings.append(
-                Finding("server", server.split()[0].lower(), None, 0.4, ("header:server",))
+                Finding("server", server.split()[0].lower(), None, 0.0, ("header:server",))
             )
     return findings
 

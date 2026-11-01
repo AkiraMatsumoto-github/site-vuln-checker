@@ -120,13 +120,13 @@ class SiteHealthInfo:
             )
         if self.php_version:
             findings.append(
-                Finding("language", "php", self.php_version, 0.98, ("site-health:wp-server",))
+                Finding("language", "php", self.php_version, 1.0, ("site-health:wp-server",))
             )
         if self.httpd:
             m = _VERSION_RE.search(self.httpd)
             name = self.httpd.split("/")[0].strip().lower()
             findings.append(
-                Finding("server", name, m.group(0) if m else None, 0.95, ("site-health:wp-server",))
+                Finding("server", name, m.group(0) if m else None, 1.0, ("site-health:wp-server",))
             )
         if self.database:
             m = _VERSION_RE.search(self.database)
@@ -136,7 +136,7 @@ class SiteHealthInfo:
                     "database",
                     name,
                     m.group(0) if m else None,
-                    0.95,
+                    1.0,
                     ("site-health:wp-database",),
                 )
             )

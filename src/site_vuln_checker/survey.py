@@ -74,7 +74,9 @@ class Survey:
             "core_version_rate": round(
                 self._rate(lambda a: any(c.version for c in a.of_kind("core"))), 3
             ),
-            "core_confidence_avg": round(sum(c.confidence for c in cores) / len(cores), 3)
+            "core_version_confidence_avg": round(
+                sum(c.version_confidence for c in cores) / len(cores), 3
+            )
             if cores
             else 0.0,
             "php_version_rate": round(
@@ -119,7 +121,7 @@ class Survey:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8-sig", newline="") as fh:
             writer = csv.writer(fh)
-            writer.writerow(["url", "kind", "name", "version", "confidence", "evidence"])
+            writer.writerow(["url", "kind", "name", "version", "version_confidence", "evidence"])
             for result in self.results:
                 if result.analysis is None:
                     continue
@@ -130,7 +132,7 @@ class Survey:
                             finding.kind,
                             finding.name,
                             finding.version or "",
-                            finding.confidence,
+                            finding.version_confidence,
                             " | ".join(finding.evidence),
                         ]
                     )

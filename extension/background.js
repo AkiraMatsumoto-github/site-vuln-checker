@@ -385,7 +385,7 @@ function applyVersions(analysis, versions) {
 
     if (existing) {
       existing.version = version;
-      existing.confidence = 1;
+      existing.versionConfidence = 1;
       existing.evidence = [...new Set([...(existing.evidence || []), `input:${product}`])];
       continue;
     }
@@ -394,7 +394,7 @@ function applyVersions(analysis, versions) {
       kind: KIND_BY_PRODUCT[product] ?? "framework",
       name: product,
       version,
-      confidence: 1,
+      versionConfidence: 1,
       evidence: [`input:${product}`],
       active: null,
       // 利用者が入れた値であることを示す（判定結果が無くても表示するため）
@@ -601,7 +601,7 @@ function applySiteHealth(analysis, info) {
     );
     if (existing) {
       existing.version = item.version;
-      existing.confidence = item.confidence;
+      existing.versionConfidence = item.versionConfidence;
       existing.evidence = [...new Set([...(existing.evidence ?? []), ...item.evidence])];
       if (item.active !== null && item.active !== undefined) existing.active = item.active;
     } else {

@@ -197,7 +197,7 @@ export function siteHealthFindings(info) {
   const findings = [];
   const add = (kind, name, version, evidence) => {
     if (!name) return;
-    findings.push({ kind, name, version: version ?? null, confidence: 1, evidence: [evidence], active: null });
+    findings.push({ kind, name, version: version ?? null, versionConfidence: 1, evidence: [evidence], active: null });
   };
 
   if (info.core) add("core", "wordpress", info.core, "site-health:wp-core");
@@ -217,7 +217,7 @@ export function siteHealthFindings(info) {
       kind: "plugin",
       name: plugin.name,
       version: plugin.version,
-      confidence: 1,
+      versionConfidence: 1,
       evidence: ["site-health:wp-plugins-active"],
       active: true,
     });
@@ -227,7 +227,7 @@ export function siteHealthFindings(info) {
       kind: "plugin",
       name: plugin.name,
       version: plugin.version,
-      confidence: 1,
+      versionConfidence: 1,
       evidence: ["site-health:wp-plugins-inactive"],
       active: false,
     });
@@ -237,7 +237,7 @@ export function siteHealthFindings(info) {
       kind: "theme",
       name: theme.name,
       version: theme.version,
-      confidence: 1,
+      versionConfidence: 1,
       evidence: ["site-health:wp-themes-active"],
       active: true,
     });

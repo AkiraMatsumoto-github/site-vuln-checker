@@ -68,13 +68,13 @@ def _esc(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-def _confidence(conf: float) -> str:
-    """**検出の確かさ**を 高 / 中 / 低 で表す（Version の正しさではない）。
+def _accuracy(conf: float) -> str:
+    """**版の確かさ**を 高 / 中 / 低 で表す（技術が使われているかの確度ではない）。
 
     数値そのものは利用者の判断に使えないため、ツールチップに残す。
     """
     label = "高" if conf >= 0.8 else "中" if conf >= 0.5 else "低"
-    return f'<span title="検出の確かさ {conf:.2f}">{label}</span>'
+    return f'<span title="版の確かさ {conf:.2f}">{label}</span>'
 
 
 def _rows(findings: list[dict]) -> str:
@@ -96,11 +96,13 @@ def _rows(findings: list[dict]) -> str:
             badge = ' <span class="tag">有効</span>'
         elif active is False:
             badge = ' <span class="tag">無効</span>'
+        version_confidence = float(f.get("version_confidence") or 0)
+        accuracy_cell = _accuracy(version_confidence) if version else "—"
         out.append(
             "<tr>"
             f"<td><b>{_esc(f.get('name'))}</b>{badge}</td>"
             f"<td>{version_cell}</td>"
-            f"<td>{_confidence(float(f.get('confidence') or 0))}</td>"
+            f"<td>{accuracy_cell}</td>"
             f"<td>{evidence}</td>"
             "</tr>"
         )
@@ -112,11 +114,12 @@ def _section(title: str, findings: list[dict]) -> str:
         return ""
     return (
         f"<h3>{_esc(title)}</h3>"
-        "<table><thead><tr><th>名前</th><th>Version</th><th>検出</th>"
+        "<table><thead><tr><th>名前</th><th>Version</th><th>精度</th>"
         f"<th>根拠</th></tr></thead><tbody>{_rows(findings)}</tbody></table>"
         '<p class="note">'
         "Version が「—」のものは、製品は判定できたが Version が取れなかったものです。"
-        "「検出」は<b>その製品だと判定できた確かさ</b>（高 / 中 / 低）です。"
+        "「精度」は<b>その Version が正しい確かさ</b>（高 / 中 / 低）です。"
+        "（製品が使われているかどうかは、根拠の列で示します）"
         "</p>"
     )
 

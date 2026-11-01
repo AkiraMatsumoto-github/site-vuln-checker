@@ -1,7 +1,7 @@
 // 外部から観測できる情報だけを使って、サイトの技術構成を推定する。
 //
 // Python 版（src/site_vuln_checker/detect.py）と同じ判定を、拡張（MV3）で使えるように移植したもの。
-// - 判定は必ず「推定」。finding は confidence と evidence を持つ
+// - 判定は必ず「推定」。finding は versionConfidence（版の確かさ）と evidence を持つ
 // - バージョンが取れないものは version=null のまま返す（推測で埋めない）
 // - 本文中の文字列だけで見つけたプラグインは active=null（有効と断定しない）
 
@@ -29,10 +29,10 @@ const LIB_TOKENS = [
 
 /** サーバ側フレームワークの目印（版はほぼ取れないので version は null）。 */
 const FRAMEWORK_SIGNALS = [
-  ["django", ["csrfmiddlewaretoken"], 0.6],
-  ["rails", ['name="authenticity_token"', 'content="authenticity_token"'], 0.6],
-  ["laravel", ["laravel_session", "laravel/framework"], 0.5],
-  ["nuxt", ["__nuxt__"], 0.6],
+  ["django", ["csrfmiddlewaretoken"]],
+  ["rails", ['name="authenticity_token"', 'content="authenticity_token"']],
+  ["laravel", ["laravel_session", "laravel/framework"]],
+  ["nuxt", ["__nuxt__"]],
 ];
 
 /** `<meta name="generator">` から読む既知のプラットフォーム（WordPress 以外）。 */
@@ -68,7 +68,7 @@ export function detectGeneratorPlatform(generator) {
   const version = match ? match[2] : null;
   for (const [needle, slug] of GENERATOR_PLATFORMS) {
     if (name.includes(needle)) {
-      return finding("platform", slug, version, version ? 0.95 : 0.8, ["meta:generator"]);
+      return finding("platform", slug, version, version ? 1 : 0, ["meta:generator"]);
     }
   }
   return null;
@@ -76,11 +76,12 @@ export function detectGeneratorPlatform(generator) {
 
 export function detectFrameworks(htmlLower) {
   const findings = [];
-  for (const [name, needles, confidence] of FRAMEWORK_SIGNALS) {
+  for (const [name, needles] of FRAMEWORK_SIGNALS) {
     const matched = needles.filter((needle) => htmlLower.includes(needle));
     if (matched.length) {
+      // 版は取れない（目印だけ）ので versionConfidence は 0
       findings.push(
-        finding("framework", name, null, confidence, matched.map((n) => `dom:${n}`)),
+        finding("framework", name, null, 0, matched.map((n) => `dom:${n}`)),
       );
     }
   }
@@ -214,7 +215,7 @@ export function detectShopify(html, resources) {
       theme = {};
     }
     const name = String(theme?.name ?? "").trim();
-    if (name) findings.push(finding("theme", slugify(name), null, 0.85, ["dom:Shopify.theme"]));
+    if (name) findings.push(finding("theme", slugify(name), null, 0, ["dom:Shopify.theme"]));
   }
 
   const seen = new Set();
@@ -229,7 +230,7 @@ export function detectShopify(html, resources) {
       if (seen.has(app)) continue;
       if (hostMatches(host, domain)) {
         seen.add(app);
-        findings.push(finding("app", app, null, 0.7, [`host:${domain}`]));
+        findings.push(finding("app", app, null, 0, [`host:${domain}`]));
       }
     }
   }
@@ -239,8 +240,15 @@ export function detectShopify(html, resources) {
 /** プラグイン名として扱う最小文字数（短すぎる slug は前方一致させない）。 */
 export const MIN_PREFIX_MATCH = 6;
 
-export function finding(kind, name, version, confidence, evidence, active = null) {
-  return { kind, name, version: version ?? null, confidence, evidence: evidence ?? [], active };
+export function finding(kind, name, version, versionConfidence, evidence, active = null) {
+  return {
+    kind,
+    name,
+    version: version ?? null,
+    versionConfidence: versionConfidence ?? 0,
+    evidence: evidence ?? [],
+    active,
+  };
 }
 
 function basename(url) {
@@ -293,7 +301,7 @@ function detectPlatforms(htmlLower, resources) {
   if (htmlLower.includes("laravel_session")) add("laravel", "cookie:laravel_session");
 
   return [...evidence.entries()].map(([name, items]) =>
-    finding("platform", name, null, Math.min(0.99, 0.7 + 0.1 * items.length), items),
+    finding("platform", name, null, 0, items),
   );
 }
 
@@ -310,7 +318,7 @@ function detectCore(generator, resources) {
   const counts = new Map();
   for (const version of versions) counts.set(version, (counts.get(version) || 0) + 1);
   const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-  return finding("core", "wordpress", best, 0.85, [`asset:wp-includes?ver=${best}`]);
+  return finding("core", "wordpress", best, 0.75, [`asset:wp-includes?ver=${best}`]);
 }
 
 export function detectThemes(resources, html) {
@@ -336,7 +344,7 @@ export function detectThemes(resources, html) {
   return [...evidence.entries()]
     .map(([slug, items]) => {
       const version = versions.get(slug) ?? null;
-      return finding("theme", slug, version, version ? 0.5 : 0.35, unique(items));
+      return finding("theme", slug, version, version ? 0.4 : 0, unique(items));
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -354,10 +362,10 @@ export function detectLibraries(resources) {
       candidate = finding("library", lib, match[0], 0.9, [`file:${basename(url)}`]);
     } else {
       const version = queryVersion(url);
-      candidate = finding("library", lib, version, version ? 0.85 : 0.7, [`asset:${basename(url)}`]);
+      candidate = finding("library", lib, version, version ? 0.6 : 0, [`asset:${basename(url)}`]);
     }
     const existing = found.get(lib);
-    if (!existing || candidate.confidence > existing.confidence) found.set(lib, candidate);
+    if (!existing || candidate.versionConfidence > existing.versionConfidence) found.set(lib, candidate);
   }
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -377,7 +385,7 @@ export function detectServer(headers) {
     if (match) {
       findings.push(finding("server", match[1].toLowerCase(), match[2], 0.5, ["header:server"]));
     } else {
-      findings.push(finding("server", server.split(/\s+/)[0].toLowerCase(), null, 0.4, ["header:server"]));
+      findings.push(finding("server", server.split(/\s+/)[0].toLowerCase(), null, 0, ["header:server"]));
     }
   }
   return findings;
@@ -484,9 +492,9 @@ export function detectPlugins(resources, html) {
       const counts = new Map();
       for (const version of candidates) counts.set(version, (counts.get(version) || 0) + 1);
       const version = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-      findings.push(finding("plugin", slug, version, 0.85, [items[0], `asset:?ver=${version}`], active));
+      findings.push(finding("plugin", slug, version, 0.6, [items[0], `asset:?ver=${version}`], active));
     } else {
-      findings.push(finding("plugin", slug, null, 0.6, unique(items), active));
+      findings.push(finding("plugin", slug, null, 0, unique(items), active));
     }
   }
   return findings.sort((a, b) => a.name.localeCompare(b.name));
