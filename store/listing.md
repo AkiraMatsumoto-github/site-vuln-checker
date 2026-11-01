@@ -1,6 +1,11 @@
 # ストア掲載用の文章（Chrome ウェブストア）
 
-状態: **下書き（提出前に最終確認）** ／ 2026-10-31 ／ 対象バージョン **1.0.0**
+状態: **却下を受けて修正済み（再提出用）** ／ 2026-10-31 ／ 対象バージョン **1.0.0**
+アイテム名: サイト脆弱性チェッカー ／ アイテム ID: `mhplofnmngdfnfjldckhmedemmfndami`
+
+> **却下理由（参照 ID: Yellow Argon）**: 「キーワード スパム」— 説明に過剰／無関係なキーワードが含まれている。
+> 対象は詳細説明の **データ出典リスト**（`NVD（NIST）/ GitHub Advisory Database / CISA KEV / FIRST EPSS / JVN iPedia /
+> endoflife.date / WordPress.org Plugin API`）。**掲載文からは削除**した（出典はプライバシーポリシーに記載）。
 
 管理画面の入力欄に、そのまま貼れる形でまとめています。
 
@@ -27,12 +32,11 @@
 サイト脆弱性チェッカー（Site Vulnerability Checker）は、開いているページに「すでに表示・読み込みされている情報」だけを使って、サイトの技術構成を推定し、既知の脆弱性とサポート終了を「更新すべきもの」として表示します。判定はお使いの端末内で行い、閲覧 URL をサーバへ送りません。
 
 ■ わかること
-・サイトの作り（WordPress / Jekyll などの静的サイト）とバージョン
-・プラグイン・テーマの名前とバージョン（ページに読み込まれているもの）
-・PHP / Web サーバ / データベースのバージョン（サイトが公開している場合）
-・JavaScript ライブラリ（jQuery など）
-・どのアプリのスクリプトが動いているか（Shopify など。名前だけ）
-・該当する既知の脆弱性（CVE）と、影響する Version
+・サイトの作り（WordPress などの CMS、静的サイト）とそのバージョン
+・追加機能（プラグイン）やテーマの名前とバージョン
+・PHP・Web サーバ・データベースのバージョン（サイトが公開している場合）
+・読み込まれている JavaScript ライブラリ
+・該当する既知の脆弱性と、影響するバージョンの範囲
 ・サポート終了（EOL）と、同じ系統の最新版
 
 ■ 判定の見方
@@ -46,16 +50,13 @@
 2. サイドパネルの「このサイトを調べる」を押します
 3. 赤・黄・緑・情報・不明の 5 つに分かれて表示されます（0 件の枠はランプが消えます）
 4. 自分のサイトなら、WordPress の「サイトヘルス」を開いて同じボタンを押すと、PHP・データベース・停止中含む全プラグインの実測値を読み取ります（自動で「情報」タブへ切り替わります）
-5. 版が分かる場合だけ（開発者向け）、「バージョンを入力」を開いて追加できます
+5. バージョンが分かる場合だけ（開発者向け）、「バージョンを入力」を開いて追加できます
 
 ■ しないこと
 ・能動的なスキャン（ポートスキャン、ディレクトリ探索、ログイン試行、攻撃コードの送信）は行いません
 ・第三者のサイトの管理画面は読みません。認証を突破する機能はありません
 ・閲覧 URL・ページ内容・サイトヘルスの内容をサーバへ送信しません（照合は端末内）
 ・リモートコードを読み込みません（MV3 の CSP を維持）
-
-■ データの出典
-NVD（NIST）/ GitHub Advisory Database（CC-BY-4.0）/ CISA KEV / FIRST EPSS / JVN iPedia / endoflife.date / WordPress.org Plugin API
 
 ■ 免責
 判定は公開情報に基づく推定です。サイトの安全性を保証するものではありません。誤りを見つけた場合は下記の窓口までご連絡ください。
@@ -64,6 +65,10 @@ NVD（NIST）/ GitHub Advisory Database（CC-BY-4.0）/ CISA KEV / FIRST EPSS / 
 不具合・ご意見・異議申立て: https://github.com/AkiraMatsumoto-github/site-vuln-checker/issues
 プライバシーポリシー: https://akiramatsumoto-github.github.io/site-vuln-checker/privacy.html
 ```
+
+> **データの出典（NVD / GitHub Advisory Database / CISA KEV / EPSS / JVN iPedia / endoflife.date / WordPress.org）は
+> 掲載文に書かない。** 理由: 今回「キーワード スパム」と判定された。出典・ライセンスは
+> [プライバシーポリシー](https://akiramatsumoto-github.github.io/site-vuln-checker/privacy.html) の「7. データの出典とライセンス」に記載済み。
 
 ## 4. カテゴリ・言語
 
