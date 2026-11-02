@@ -47,9 +47,10 @@ Compress-Archive -Path "$stage\*" -DestinationPath svc-1.0.0.zip -Force
 | 詳細説明 | listing.md §3 |
 | カテゴリ | 開発者ツール |
 | 言語 | 日本語 |
-| ストアアイコン（128×128） | `store/icon-128x128.png`（= `extension/icons/icon128.png` のコピー） |
+| ストアアイコン（128×128） | `store/icon-128x128.png` |
 | スクリーンショット（1〜5 枚） | `store/screenshots/01-red-1280x800.png` ほか 2 枚 |
-| 小さいプロモ画像（440×280・任意） | 未作成（任意） |
+| 小さいプロモ画像（440×280） | `store/promo-440x280.png` |
+| マーキー画像（1400×560・任意） | 未作成（横長で別途デザインが必要） |
 | ホームページ URL（任意） | `https://github.com/AkiraMatsumoto-github/site-vuln-checker` |
 | サポート URL | `https://github.com/AkiraMatsumoto-github/site-vuln-checker/issues` |
 
