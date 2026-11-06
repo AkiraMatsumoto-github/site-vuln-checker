@@ -53,6 +53,7 @@
 | --- | --- |
 | ✅ 分かる | サイトの作り（WordPress／Jekyll などの静的サイト）と**バージョン**／追加機能（プラグイン）の名前とバージョン／テーマ／JavaScript ライブラリ／**該当する弱点と、影響する Version**／**サポート終了（EOL）** |
 | ✅ サイトが公開していれば分かる | **PHP のバージョン**（`X-Powered-By` を出しているサイト。実測 **10 サイト中 1 サイト**）。**初回のチェック時に許可を求めます**（拒否しても判定は続きます） |
+| ✅ 1.1.0 で追加（ヘッダ・DOM から） | **CDN・エッジ**（Cloudflare / CloudFront / Fastly / Akamai / Vercel / Netlify / Azure / Google / Sucuri / Imperva）／**セキュリティヘッダ**の設定状況（HSTS・CSP・X-Frame-Options・nosniff・Referrer-Policy・Permissions-Policy）／**計測タグ**（GA4・GTM・Clarity・Hotjar・Meta ピクセル・Yahoo!タグ など）／**画像配信**（Jetpack Photon・Cloudinary・imgix など）／**Angular のバージョン**（`ng-version`） |
 | ✅ 入力すれば分かる | 公開していないサイトの **PHP・フレームワークのバージョン**。分かる場合だけ画面から入れてください |
 | △ 半分だけ | 追加機能は**画面に読み込まれているもの**だけ。バージョンが取れないものは「不明」になります |
 | ✕ 分からない | サーバーが公開していない PHP の版／管理画面の中でだけ動く追加機能／サービスのサーバー側／**「安全である」こと** |

@@ -215,3 +215,101 @@ def test_plugin_version_uses_most_common_query_version() -> None:
     analysis = analyze("https://example.com/", html, {})
     plugin = _get(analysis, "plugin", "contact-form-7")
     assert plugin.version == "5.9.8", "先頭の 1.0 ではなく最頻値"
+
+# --- CDN / セキュリティヘッダ / タグ / 画像配信（1.1.0）------------------------
+
+
+def test_cdn_cloudflare_is_not_a_server() -> None:
+    """CF-Ray があれば CDN は cloudflare（「サーバ」行にはしない）。"""
+    headers = {"cf-ray": "8f2b1c3d4e5f-NRT", "server": "cloudflare"}
+    analysis = analyze("https://example.com/", "", headers)
+    assert [f.name for f in analysis.of_kind("cdn")] == ["cloudflare"]
+    assert analysis.of_kind("server") == [], "CDN を「サーバ」と二重に表示しない"
+
+
+def test_cdn_cloudfront_from_via() -> None:
+    headers = {"via": "1.1 a1c2.cloudfront.net (CloudFront)"}
+    analysis = analyze("https://example.com/", "", headers)
+    assert [f.name for f in analysis.of_kind("cdn")] == ["cloudfront"]
+
+
+def test_security_headers_only_list_configured() -> None:
+    headers = {"strict-transport-security": "max-age=31536000", "server": "nginx"}
+    analysis = analyze("https://example.com/", "", headers)
+    assert [f.name for f in analysis.of_kind("security")] == ["hsts"]
+    note = next(n for n in analysis.notes if n.startswith("未設定のセキュリティヘッダ"))
+    assert "hsts" not in note, "設定済みのヘッダは挙げない"
+    assert "脆弱性ではありません" in note
+
+
+def test_security_note_is_skipped_without_headers() -> None:
+    analysis = analyze("https://example.com/", "", {})
+    assert not any(n.startswith("未設定のセキュリティヘッダ") for n in analysis.notes)
+
+
+def test_analytics_tags_and_image_cdn() -> None:
+    html = (
+        "<html><head>"
+        '<script src="https://www.googletagmanager.com/gtag/js?id=G-XXXX"></script>'
+        '<script src="https://www.google-analytics.com/g/collect?v=2"></script>'
+        '<script src="https://connect.facebook.net/en_US/fbevents.js"></script>'
+        '<script src="https://s.yjtag.jp/tag.js"></script>'
+        '<img src="https://i0.wp.com/example.com/a.png">'
+        '<img src="https://example.imgix.net/b.jpg">'
+        "</head><body></body></html>"
+    )
+    analysis = analyze("https://example.com/", html, {})
+    assert [f.name for f in analysis.of_kind("tag")] == ["ga4", "meta-pixel", "yahoo-tag"]
+    assert [f.name for f in analysis.of_kind("image")] == ["imgix", "jetpack-photon"]
+
+
+def test_angular_version_from_ng_version() -> None:
+    """Angular は ng-version に版が入っているので確定扱い。JS ライブラリ側は重ねない。"""
+    html = (
+        '<html><body><app-root ng-version="17.3.1"></app-root>'
+        '<script src="/angular.min.js"></script></body></html>'
+    )
+    analysis = analyze("https://example.com/", html, {})
+    angular = _get(analysis, "framework", "angular")
+    assert angular.version == "17.3.1"
+    assert angular.version_confidence == 1.0
+    assert "angular" not in [f.name for f in analysis.of_kind("library")]
+
+
+def test_aspnet_express_servlet_litespeed() -> None:
+    aspnet = analyze(
+        "https://example.com/", "", {"x-powered-by": "ASP.NET", "x-aspnet-version": "4.0.30319"}
+    )
+    assert _get(aspnet, "language", "aspnet").version == "4.0.30319"
+
+    express = analyze("https://example.com/", "", {"x-powered-by": "Express"})
+    assert _get(express, "framework", "express").version is None
+
+    servlet = analyze("https://example.com/", "", {"x-powered-by": "Servlet/3.1"})
+    assert _get(servlet, "language", "java").version == "3.1"
+
+    litespeed = analyze("https://example.com/", "", {"x-litespeed-cache": "hit"})
+    assert _get(litespeed, "server", "litespeed").version is None
+
+
+def test_ads_and_domestic_tags() -> None:
+    """広告タグと国内タグ（Google 広告・SmartNews・MicroAd・D2C・Yahoo!）を判定する。"""
+    html = (
+        "<html><head>"
+        '<script src="https://ad.doubleclick.net/ddm/track.js"></script>'
+        '<script src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>'
+        '<script src="https://cdn.smartnews-ads.com/v1/ads.js"></script>'
+        '<script src="https://cdn.microad.jp/js/tag.js"></script>'
+        '<script src="https://meas.hera.d2c.ne.jp/tag.js"></script>'
+        '<script src="https://s.yjmg.jp/tag.js"></script>'
+        "</head><body></body></html>"
+    )
+    analysis = analyze("https://example.com/", html, {})
+    assert [f.name for f in analysis.of_kind("tag")] == [
+        "d2c",
+        "google-ads",
+        "google-adsense",
+        "microad",
+        "smartnews-ads",
+        "yahoo-ads",
+    ]

@@ -18,6 +18,10 @@ const KIND_LABEL = {
   framework: "フレームワーク",
   server: "サーバ",
   database: "DB",
+  cdn: "CDN",
+  security: "セキュリティ",
+  tag: "タグ",
+  image: "画像配信",
 };
 
 function element(tag, className, text) {

@@ -182,3 +182,157 @@ test("ヘッダが無ければ PHP は不明のまま（推測しない）", () 
   assert.ok(analysis.notes.some((note) => note.startsWith("PHP のバージョン")));
 });
 
+
+// --- CDN / セキュリティヘッダ / タグ / 画像配信（1.1.0）------------------------
+
+test("CF-Ray があれば CDN は cloudflare（「サーバ」行にはしない）", () => {
+  const analysis = analyze({
+    url: "https://example.com/",
+    html: "<html><body>hello</body></html>",
+    resources: [],
+    headers: { "cf-ray": "8f2b1c3d4e5f-NRT", server: "cloudflare" },
+  });
+  assert.deepEqual(
+    analysis.findings.filter((item) => item.kind === "cdn").map((item) => item.name),
+    ["cloudflare"],
+  );
+  assert.equal(
+    analysis.findings.filter((item) => item.kind === "server").length,
+    0,
+    "CDN を「サーバ」と二重に表示しない",
+  );
+});
+
+test("CloudFront は x-amz-cf-id と via の両方で判定する", () => {
+  const byHeader = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: [],
+    headers: { "x-amz-cf-id": "abc123" },
+  });
+  assert.ok(byHeader.findings.some((item) => item.kind === "cdn" && item.name === "cloudfront"));
+
+  const byVia = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: [],
+    headers: { via: "1.1 a1b2c3.cloudfront.net (CloudFront)" },
+  });
+  assert.ok(byVia.findings.some((item) => item.kind === "cdn" && item.name === "cloudfront"));
+});
+
+test("セキュリティヘッダは設定済みだけ行にし、未設定は注記にする", () => {
+  const analysis = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: [],
+    headers: { "strict-transport-security": "max-age=31536000", server: "nginx" },
+  });
+  assert.deepEqual(
+    analysis.findings.filter((item) => item.kind === "security").map((item) => item.name),
+    ["hsts"],
+  );
+  const note = analysis.notes.find((item) => item.startsWith("未設定のセキュリティヘッダ"));
+  assert.ok(note, "未設定の注記が出る");
+  assert.ok(!note.includes("hsts"), "設定済みのヘッダは挙げない");
+  assert.ok(note.includes("脆弱性ではありません"));
+});
+
+test("ヘッダが取れていないときは未設定の注記を出さない", () => {
+  const analysis = analyze({ url: "https://example.com/", html: "", resources: [], headers: {} });
+  assert.ok(!analysis.notes.some((item) => item.startsWith("未設定のセキュリティヘッダ")));
+});
+
+test("タグは GTM / GA4 / ピクセルをホストで見分ける", () => {
+  const analysis = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: [
+      "https://www.googletagmanager.com/gtag/js?id=G-XXXX",
+      "https://www.google-analytics.com/g/collect?v=2",
+      "https://connect.facebook.net/en_US/fbevents.js",
+      "https://s.yjtag.jp/tag.js",
+    ],
+  });
+  assert.deepEqual(
+    analysis.findings.filter((item) => item.kind === "tag").map((item) => item.name),
+    ["ga4", "meta-pixel", "yahoo-tag"],
+  );
+});
+
+test("画像配信（Jetpack Photon / imgix）を出す", () => {
+  const analysis = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: ["https://i0.wp.com/example.com/a.png", "https://example.imgix.net/b.jpg"],
+  });
+  assert.deepEqual(
+    analysis.findings.filter((item) => item.kind === "image").map((item) => item.name),
+    ["imgix", "jetpack-photon"],
+  );
+});
+
+test("Angular は ng-version から版を出し、JS ライブラリ側は重ねない", () => {
+  const analysis = analyze({
+    url: "https://example.com/",
+    html: '<html><body><app-root ng-version="17.3.1"></app-root></body></html>',
+    resources: ["https://example.com/angular.min.js"],
+  });
+  const angular = find(analysis, "framework", "angular");
+  assert.equal(angular.version, "17.3.1");
+  assert.equal(angular.versionConfidence, 1, "DOM の属性なので確定扱い");
+  assert.equal(find(analysis, "library", "angular"), undefined, "二重表示しない");
+});
+
+test("ASP.NET / Express / Servlet / LiteSpeed をヘッダから読む", () => {
+  const aspnet = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: [],
+    headers: { "x-powered-by": "ASP.NET", "x-aspnet-version": "4.0.30319" },
+  });
+  assert.equal(find(aspnet, "language", "aspnet").version, "4.0.30319");
+
+  const express = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: [],
+    headers: { "x-powered-by": "Express" },
+  });
+  assert.ok(find(express, "framework", "express"));
+
+  const servlet = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: [],
+    headers: { "x-powered-by": "Servlet/3.1" },
+  });
+  assert.equal(find(servlet, "language", "java").version, "3.1");
+
+  const litespeed = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: [],
+    headers: { "x-litespeed-cache": "hit" },
+  });
+  assert.ok(find(litespeed, "server", "litespeed"));
+});
+
+test("広告・国内タグもホストで判定する（1.1.0）", () => {
+  const analysis = analyze({
+    url: "https://example.com/",
+    html: "",
+    resources: [
+      "https://ad.doubleclick.net/ddm/track.js",
+      "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js",
+      "https://cdn.smartnews-ads.com/v1/ads.js",
+      "https://cdn.microad.jp/js/tag.js",
+      "https://meas.hera.d2c.ne.jp/tag.js",
+      "https://s.yjmg.jp/tag.js",
+    ],
+  });
+  assert.deepEqual(
+    analysis.findings.filter((item) => item.kind === "tag").map((item) => item.name),
+    ["d2c", "google-ads", "google-adsense", "microad", "smartnews-ads", "yahoo-ads"],
+  );
+});

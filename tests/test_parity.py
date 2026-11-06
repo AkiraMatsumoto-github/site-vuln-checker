@@ -18,7 +18,17 @@ from pathlib import Path
 import pytest
 
 from site_vuln_checker.advisories import judge
-from site_vuln_checker.detect import SHOPIFY_APP_DOMAINS, Analysis, Finding
+from site_vuln_checker.detect import (
+    ANALYTICS_TAG_HOSTS,
+    CDN_SERVER_NAMES,
+    CDN_SIGNATURES,
+    IMAGE_CDN_HOSTS,
+    SECURITY_HEADERS,
+    SHOPIFY_APP_DOMAINS,
+    Analysis,
+    Finding,
+    analyze,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "extension" / "tests" / "parity_runner.mjs"
@@ -167,3 +177,68 @@ def test_shopify_app_dictionary_is_identical() -> None:
     js_domains = [tuple(pair) for pair in json.loads(completed.stdout)["shopifyDomains"]]
     assert js_domains == list(SHOPIFY_APP_DOMAINS)
     assert len(js_domains) >= 50
+
+#: 1.1.0 で追加した検出の突き合わせ用ケース（拡張と Python で同じ結果になること）
+DETECT_CASE = {
+    "url": "https://example.com/",
+    "html": (
+        "<html><head>"
+        '<script src="https://www.googletagmanager.com/gtag/js?id=G-XXXX"></script>'
+        '<script src="https://connect.facebook.net/en_US/fbevents.js"></script>'
+        "</head><body>"
+        '<img src="https://i0.wp.com/example.com/a.png">'
+        "</body></html>"
+    ),
+    "resources": [
+        "https://www.googletagmanager.com/gtag/js?id=G-XXXX",
+        "https://connect.facebook.net/en_US/fbevents.js",
+        "https://i0.wp.com/example.com/a.png",
+    ],
+    "headers": {
+        "cf-ray": "8f2b1c3d4e5f-NRT",
+        "server": "cloudflare",
+        "strict-transport-security": "max-age=60",
+    },
+}
+
+
+def _run_runner(payload: dict) -> dict:
+    completed = subprocess.run(
+        [NODE, str(RUNNER)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    return json.loads(completed.stdout)
+
+
+@pytest.mark.skipif(NODE is None, reason="Node が無い環境ではスキップ（CI では実行）")
+def test_new_dictionaries_are_identical() -> None:
+    """CDN / セキュリティ / タグ / 画像配信の辞書が Python と**同じ内容・同じ順**か。"""
+    dictionaries = _run_runner({"index": INDEX, "today": TODAY, "cases": []})["dictionaries"]
+
+    assert [[name, list(needles)] for name, needles in dictionaries["cdnSignatures"]] == [
+        [name, list(needles)] for name, needles in CDN_SIGNATURES
+    ]
+    assert [tuple(pair) for pair in dictionaries["cdnServerNames"]] == list(CDN_SERVER_NAMES)
+    assert [tuple(pair) for pair in dictionaries["securityHeaders"]] == list(SECURITY_HEADERS)
+    assert [tuple(pair) for pair in dictionaries["analyticsTagHosts"]] == list(ANALYTICS_TAG_HOSTS)
+    assert [tuple(pair) for pair in dictionaries["imageCdnHosts"]] == list(IMAGE_CDN_HOSTS)
+
+
+@pytest.mark.skipif(NODE is None, reason="Node が無い環境ではスキップ（CI では実行）")
+def test_new_detections_agree() -> None:
+    """CDN・セキュリティ・タグ・画像配信の検出結果が拡張と Python で一致するか。"""
+    detected = _run_runner(
+        {"index": INDEX, "today": TODAY, "cases": [], "detect": DETECT_CASE}
+    )["detected"]
+    js = [(item["kind"], item["name"]) for item in detected]
+
+    analysis = analyze(DETECT_CASE["url"], DETECT_CASE["html"], DETECT_CASE["headers"])
+    kinds = ("cdn", "security", "tag", "image")
+    python = [(f.kind, f.name) for f in analysis.findings if f.kind in kinds]
+
+    assert js == python
+    assert js, "ケースが空（検出できていない）"

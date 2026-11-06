@@ -25,6 +25,8 @@ const LIB_TOKENS = [
   ["react", ["react.", "react-dom", "/react@"]],
   ["swiper", ["swiper"]],
   ["gsap", ["gsap", "tweenmax", "tweenlite"]],
+  ["htmx", ["htmx"]],
+  ["alpine", ["alpinejs", "alpine.min"]],
 ];
 
 /** サーバ側フレームワークの目印（版はほぼ取れないので version は null）。 */
@@ -33,7 +35,11 @@ const FRAMEWORK_SIGNALS = [
   ["rails", ['name="authenticity_token"', 'content="authenticity_token"']],
   ["laravel", ["laravel_session", "laravel/framework"]],
   ["nuxt", ["__nuxt__"]],
+  ["sveltekit", ["data-sveltekit-preload-data", "__sveltekit"]],
 ];
+
+/** Angular は `ng-version` に**そのまま版が入っている**（DOM の属性なので確定扱い）。 */
+const ANGULAR_VERSION_RE = /ng-version=["'](\d+(?:\.\d+)*)["']/i;
 
 /** `<meta name="generator">` から読む既知のプラットフォーム（WordPress 以外）。 */
 const GENERATOR_PLATFORMS = [
@@ -370,23 +376,231 @@ export function detectLibraries(resources) {
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function detectServer(headers) {
+// --- CDN / セキュリティヘッダ / タグ / 画像配信（1.1.0）-------------------------
+//
+// 追加の通信はしない。すでに取得済みのヘッダとリソース URL だけで判定する。
+// Python 側（src/site_vuln_checker/detect.py）と**同じ内容・同じ順**にする。
+
+/** CDN の目印（ヘッダ）。一致したものはすべて出す。 */
+export const CDN_SIGNATURES = [
+  ["cloudflare", ["cf-ray", "cf-cache-status"]],
+  ["cloudfront", ["x-amz-cf-id", "x-amz-cf-pop"]],
+  ["fastly", ["x-fastly-request-id", "x-served-by"]],
+  ["akamai", ["x-akamai-transformed", "akamai-grn", "x-akamai-request-id"]],
+  ["vercel", ["x-vercel-id", "x-vercel-cache"]],
+  ["netlify", ["x-nf-request-id"]],
+  ["azure", ["x-azure-ref"]],
+  ["google-cloud", ["x-cloud-trace-context"]],
+  ["sucuri", ["x-sucuri-id", "x-sucuri-cache"]],
+  ["imperva", ["x-iinfo"]],
+];
+
+/** `server` ヘッダの前方一致 → CDN 名（CDN は「サーバ」行にしない）。 */
+export const CDN_SERVER_NAMES = [
+  ["cloudflare", "cloudflare"],
+  ["akamaighost", "akamai"],
+  ["vercel", "vercel"],
+  ["netlify", "netlify"],
+  ["google frontend", "google-cloud"],
+  ["gws", "google-cloud"],
+  ["bunnycdn", "bunny"],
+  ["keycdn", "keycdn"],
+  ["sucuri", "sucuri"],
+  ["github.com", "github-pages"],
+  ["windows-azure", "azure"],
+];
+
+/** セキュリティヘッダ（設定されているものだけ行にする）。 */
+export const SECURITY_HEADERS = [
+  ["hsts", "strict-transport-security"],
+  ["csp", "content-security-policy"],
+  ["x-frame-options", "x-frame-options"],
+  ["x-content-type-options", "x-content-type-options"],
+  ["referrer-policy", "referrer-policy"],
+  ["permissions-policy", "permissions-policy"],
+];
+
+/** 計測タグ（ホスト名 → 名前）。 */
+export const ANALYTICS_TAG_HOSTS = [
+  ["googletagmanager.com", "gtm"],
+  ["google-analytics.com", "ga4"],
+  ["clarity.ms", "clarity"],
+  ["hotjar.com", "hotjar"],
+  ["connect.facebook.net", "meta-pixel"],
+  ["analytics.tiktok.com", "tiktok-pixel"],
+  ["static.ads-twitter.com", "x-pixel"],
+  ["yjtag.jp", "yahoo-tag"],
+  ["line-scdn.net", "line-tag"],
+  ["bat.bing.com", "microsoft-uet"],
+  ["js.hs-scripts.com", "hubspot"],
+  ["assets.adobedtm.com", "adobe-analytics"],
+  ["cdn.segment.com", "segment"],
+  // 広告・国内タグ（1.1.0）
+  ["doubleclick.net", "google-ads"],
+  ["googlesyndication.com", "google-adsense"],
+  ["smartnews-ads.com", "smartnews-ads"],
+  ["microad.jp", "microad"],
+  ["d2c.ne.jp", "d2c"],
+  ["yjmg.jp", "yahoo-ads"],
+];
+
+/** 画像配信（ホスト名 → 名前）。Jetpack Photon は `i0.wp.com` 形式なので別扱い。 */
+export const IMAGE_CDN_HOSTS = [
+  ["cloudinary.com", "cloudinary"],
+  ["imgix.net", "imgix"],
+  ["ctfassets.net", "contentful"],
+  ["sanity.io", "sanity"],
+];
+
+const PHOTON_HOST_RE = /^i\d\.wp\.com$/i;
+const GTM_HOST = "googletagmanager.com";
+
+function lowerHeaders(headers) {
   const lower = {};
   for (const [key, value] of Object.entries(headers || {})) lower[key.toLowerCase()] = value;
+  return lower;
+}
+
+function hasHeader(lower, header) {
+  return String(lower[header] ?? "").trim() !== "";
+}
+
+/** `server` が CDN の名前なら、その CDN 名を返す（「サーバ」行にしないため）。 */
+export function cdnFromServer(lower) {
+  const server = String(lower["server"] || "").toLowerCase().trim();
+  if (!server) return null;
+  for (const [prefix, name] of CDN_SERVER_NAMES) {
+    if (server.startsWith(prefix)) return name;
+  }
+  return null;
+}
+
+export function detectCdn(headers) {
+  const lower = lowerHeaders(headers);
+  const found = new Map();
+
+  for (const [name, needles] of CDN_SIGNATURES) {
+    const hit = needles.find((header) => hasHeader(lower, header));
+    if (hit) found.set(name, `header:${hit}`);
+  }
+
+  if (!found.has("cloudfront")) {
+    const via = String(lower["via"] || "").toLowerCase();
+    if (via.includes("cloudfront.net")) found.set("cloudfront", "header:via");
+  }
+
+  const fromServer = cdnFromServer(lower);
+  if (fromServer && !found.has(fromServer)) found.set(fromServer, "header:server");
+
+  return [...found.entries()].map(([name, evidence]) => finding("cdn", name, null, 0, [evidence]));
+}
+
+export function detectSecurityHeaders(headers) {
+  const lower = lowerHeaders(headers);
+  return SECURITY_HEADERS.filter(([, header]) => hasHeader(lower, header)).map(([name, header]) =>
+    finding("security", name, null, 0, [`header:${header}`]),
+  );
+}
+
+/** 未設定のセキュリティヘッダ（注記用）。ヘッダが 1 つも取れていなければ空。 */
+export function missingSecurityHeaders(headers) {
+  const lower = lowerHeaders(headers);
+  if (!Object.keys(lower).length) return [];
+  return SECURITY_HEADERS.filter(([, header]) => !hasHeader(lower, header)).map(([name]) => name);
+}
+
+export function detectAnalyticsTags(resources) {
+  const found = new Map();
+  for (const url of resources) {
+    let host = "";
+    let path = "";
+    try {
+      const parsed = new URL(url);
+      host = parsed.hostname.toLowerCase();
+      path = parsed.pathname.toLowerCase();
+    } catch {
+      continue;
+    }
+    for (const [domain, tag] of ANALYTICS_TAG_HOSTS) {
+      if (!hostMatches(host, domain)) continue;
+      // googletagmanager.com は `/gtag/js`（GA4）と `/gtm.js`（GTM）で名前を分ける
+      const name = domain === GTM_HOST && path.includes("/gtag/js") ? "ga4" : tag;
+      if (!found.has(name)) found.set(name, `host:${domain}`);
+    }
+  }
+  return [...found.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([name, evidence]) => finding("tag", name, null, 0, [evidence]));
+}
+
+export function detectImageCdn(resources) {
+  const found = new Map();
+  for (const url of resources) {
+    let host = "";
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      continue;
+    }
+    if (PHOTON_HOST_RE.test(host) && !found.has("jetpack-photon")) {
+      found.set("jetpack-photon", "host:i0.wp.com");
+    }
+    for (const [domain, name] of IMAGE_CDN_HOSTS) {
+      if (hostMatches(host, domain) && !found.has(name)) found.set(name, `host:${domain}`);
+    }
+  }
+  return [...found.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([name, evidence]) => finding("image", name, null, 0, [evidence]));
+}
+
+/** Angular の版（`ng-version` 属性にそのまま入っている）。 */
+export function detectAngularVersion(html) {
+  const match = ANGULAR_VERSION_RE.exec(String(html ?? ""));
+  return match ? finding("framework", "angular", match[1], 1.0, ["dom:ng-version"]) : null;
+}
+
+export function detectServer(headers) {
+  const lower = lowerHeaders(headers);
   const findings = [];
 
   const powered = String(lower["x-powered-by"] || "");
   const php = PHP_HEADER_RE.exec(powered);
   if (php) findings.push(finding("language", "php", php[1], 0.6, ["header:x-powered-by"]));
 
+  // ASP.NET は X-AspNet-Version に版がある（X-Powered-By は "ASP.NET" だけ）
+  if (/asp\.net/i.test(powered)) {
+    const version = String(lower["x-aspnet-version"] || "").trim() || null;
+    findings.push(finding("language", "aspnet", version, version ? 0.6 : 0, ["header:x-powered-by"]));
+  }
+  const mvc = String(lower["x-aspnetmvc-version"] || "").trim();
+  if (mvc) {
+    findings.push(finding("framework", "asp.net-mvc", mvc, 0.6, ["header:x-aspnetmvc-version"]));
+  }
+
+  // Express は "X-Powered-By: Express"（版は出さない）
+  if (/^express$/i.test(powered.trim())) {
+    findings.push(finding("framework", "express", null, 0, ["header:x-powered-by"]));
+  }
+
+  // Java（Servlet）は "X-Powered-By: Servlet/3.1"
+  const servlet = /Servlet\/(\d+(?:\.\d+)*)/i.exec(powered);
+  if (servlet) findings.push(finding("language", "java", servlet[1], 0.6, ["header:x-powered-by"]));
+
   const server = String(lower["server"] || "");
-  if (server) {
+  // 実体が CDN のときは「サーバ」行にしない（CDN 側で出す）
+  if (server && !cdnFromServer(lower)) {
     const match = SERVER_RE.exec(server);
     if (match) {
       findings.push(finding("server", match[1].toLowerCase(), match[2], 0.5, ["header:server"]));
     } else {
       findings.push(finding("server", server.split(/\s+/)[0].toLowerCase(), null, 0, ["header:server"]));
     }
+  }
+
+  // LiteSpeed は Server を隠していても X-LiteSpeed-Cache が残る
+  if (hasHeader(lower, "x-litespeed-cache") && !/litespeed/i.test(server)) {
+    findings.push(finding("server", "litespeed", null, 0, ["header:x-litespeed-cache"]));
   }
   return findings;
 }
@@ -399,7 +613,7 @@ export function detectServer(headers) {
 /**
  * 「判定できなかったこと」の一覧。入力で版が埋まったら作り直すため、単独で呼べるようにする。
  */
-export function buildNotes(findings) {
+export function buildNotes(findings, headers = {}) {
   const notes = [];
   if (!findings.some((item) => item.kind === "platform")) {
     notes.push("プラットフォームを判定できませんでした");
@@ -433,6 +647,12 @@ export function buildNotes(findings) {
   if (frameworks.length) {
     notes.push(`フレームワークの版は外から分かりません: ${frameworks.join(", ")}（入力すると判定できます）`);
   }
+
+  // 未設定のセキュリティヘッダは「情報」にしておく（脆弱性ではないので赤・黄にはしない）
+  const missing = missingSecurityHeaders(headers);
+  if (missing.length) {
+    notes.push(`未設定のセキュリティヘッダ: ${missing.join(", ")}（脆弱性ではありません）`);
+  }
   return notes;
 }
 
@@ -442,6 +662,9 @@ export function analyze(evidence) {
   const generatorMatch = /<meta[^>]+name=["']generator["'][^>]*content=["']([^"']*)["']/i.exec(htmlLower);
   const generator = generatorMatch ? generatorMatch[1] : "";
 
+  // Angular は ng-version に版がそのまま入っているので、フレームワーク行として先に出す
+  const angular = detectAngularVersion(html);
+
   const findings = [
     ...detectPlatforms(htmlLower, resources),
     detectGeneratorPlatform(generator),
@@ -450,11 +673,21 @@ export function analyze(evidence) {
     ...detectThemes(resources, html),
     ...detectShopify(html, resources),
     ...detectLibraries(resources),
+    angular,
     ...detectFrameworks(htmlLower),
     ...detectServer(headers),
+    ...detectCdn(headers),
+    ...detectSecurityHeaders(headers),
+    ...detectAnalyticsTags(resources),
+    ...detectImageCdn(resources),
   ].filter(Boolean);
 
-  return { url, findings, notes: buildNotes(findings) };
+  // ng-version で版が分かっているときは、JS ライブラリ側の angular 行を出さない（二重表示を避ける）
+  const deduped = angular
+    ? findings.filter((item) => !(item.kind === "library" && item.name === "angular"))
+    : findings;
+
+  return { url, findings: deduped, notes: buildNotes(deduped, headers) };
 }
 
 export function detectPlugins(resources, html) {

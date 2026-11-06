@@ -262,7 +262,7 @@ async function inspectActiveTab() {
   const siteHealth = await storedSiteHealth(origin);
   applySiteHealth(analysis, siteHealth);
   // 入力を反映したあとで「判定できなかったこと」を作り直す（PHP の版が入ったら注意書きを消す）
-  analysis.notes = buildNotes(analysis.findings);
+  analysis.notes = buildNotes(analysis.findings, headers);
   analysis.notes.push(...versionNotes);
   if (siteHealth) {
     const readAt = siteHealth.readAt ? new Date(siteHealth.readAt) : null;

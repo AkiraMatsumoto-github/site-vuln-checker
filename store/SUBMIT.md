@@ -227,3 +227,39 @@ Compress-Archive -Path "$stage\*" -DestinationPath svc-1.0.1.zip -Force
 ・構成表の「検出」を「精度」に変え、Version が正しい確かさ（高 / 中 / 低）を示すようにしました。
 ・アプリの説明文を分かりやすい表現に調整しました。
 ```
+
+---
+
+## 10. 更新（1.1.0）— CDN・セキュリティヘッダ・タグ・画像配信
+
+1.0.1 からの更新。**検出項目を増やしたので掲載文とスクリーンショットも直す**。
+設計は [`../docs/design-cdn-and-headers.md`](../docs/design-cdn-and-headers.md)。
+
+### 1) ZIP を作る
+
+```powershell
+$stage = Join-Path $env:TEMP "svc-stage-110"
+Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $stage | Out-Null
+Copy-Item extension\* $stage -Recurse
+Remove-Item "$stage\tests", "$stage\README.md" -Recurse -Force
+Compress-Archive -Path "$stage\*" -DestinationPath svc-1.1.0.zip -Force
+```
+
+- [ ] `extension/manifest.json` の `version` が **1.1.0**
+- [ ] 権限（`permissions` / `optional_host_permissions`）が 1.0.1 と同じ（**増やしていない**）
+
+### 2) What's new（文案）
+
+```
+・構成表に「CDN」「セキュリティ」「タグ」「画像配信」を追加しました。
+・Cloudflare / CloudFront / Fastly / Akamai などの CDN・エッジを判定します。
+・HSTS・CSP などのセキュリティヘッダの設定状況を表示します。
+・Angular の Version など、これまで取れなかった版を表示します。
+```
+
+### 3) 掲載文
+
+- [ ] `store/listing.md` の「わかること」に CDN・セキュリティヘッダ・タグの行を追加（反映済み）
+- [ ] 社名・製品名を**列挙しすぎない**（キーワードスパム判定を避ける。2026-10-31 の却下を参照）
+- [ ] スクリーンショットは `store/screenshots/03-composition-1280x800.png` を新しい構成表で撮り直すと吉

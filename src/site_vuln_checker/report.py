@@ -25,8 +25,13 @@ KIND_LABELS = {
     "app": "アプリ",
     "library": "JS ライブラリ",
     "language": "言語",
+    "framework": "フレームワーク",
     "server": "サーバ",
     "database": "DB",
+    "cdn": "CDN",
+    "security": "セキュリティ",
+    "tag": "タグ",
+    "image": "画像配信",
 }
 
 _CSS = """

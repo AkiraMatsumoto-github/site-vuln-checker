@@ -41,6 +41,8 @@ _LIB_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("react", ("react.", "react-dom", "/react@")),
     ("swiper", ("swiper",)),
     ("gsap", ("gsap", "tweenmax", "tweenlite")),
+    ("htmx", ("htmx",)),
+    ("alpine", ("alpinejs", "alpine.min")),
 )
 
 
@@ -322,6 +324,7 @@ def _detect_frameworks(html_lower: str) -> list[Finding]:
         ("rails", ('name="authenticity_token"', 'content="authenticity_token"')),
         ("laravel", ("laravel_session", "laravel/framework")),
         ("nuxt", ("__nuxt__",)),
+        ("sveltekit", ("data-sveltekit-preload-data", "__sveltekit")),
     )
     findings: list[Finding] = []
     for name, needles in signals:
@@ -511,16 +514,42 @@ def _detect_shopify(html: str, resources: list[str]) -> list[Finding]:
 
 
 def _detect_server(headers: dict[str, str]) -> list[Finding]:
-    """``X-Powered-By`` / ``Server`` から PHP と Web サーバを推定する。"""
+    """``X-Powered-By`` / ``Server`` から PHP・ASP.NET・Java と Web サーバを推定する。"""
     findings: list[Finding] = []
 
-    m = _PHP_HEADER_RE.search(headers.get("x-powered-by", ""))
+    powered = headers.get("x-powered-by", "")
+    m = _PHP_HEADER_RE.search(powered)
     if m:
         # ヘッダはプロキシで書き換わることもあるため確度は 0.6（6.2 の方針）
         findings.append(Finding("language", "php", m.group(1), 0.6, ("header:x-powered-by",)))
 
+    # ASP.NET は X-AspNet-Version に版がある（X-Powered-By は "ASP.NET" だけ）
+    if "asp.net" in powered.lower():
+        version = headers.get("x-aspnet-version", "").strip() or None
+        confidence = 0.6 if version else 0.0
+        findings.append(
+            Finding("language", "aspnet", version, confidence, ("header:x-powered-by",))
+        )
+    mvc = headers.get("x-aspnetmvc-version", "").strip()
+    if mvc:
+        findings.append(
+            Finding("framework", "asp.net-mvc", mvc, 0.6, ("header:x-aspnetmvc-version",))
+        )
+
+    # Express は "X-Powered-By: Express"（版は出さない）
+    if powered.strip().lower() == "express":
+        findings.append(Finding("framework", "express", None, 0.0, ("header:x-powered-by",)))
+
+    # Java（Servlet）は "X-Powered-By: Servlet/3.1"
+    servlet = re.search(r"Servlet/(\d+(?:\.\d+)*)", powered, re.I)
+    if servlet:
+        findings.append(
+            Finding("language", "java", servlet.group(1), 0.6, ("header:x-powered-by",))
+        )
+
     server = headers.get("server", "")
-    if server:
+    # 実体が CDN のときは「サーバ」行にしない（CDN 側で出す）
+    if server and not _cdn_from_server(headers):
         m2 = _SERVER_RE.search(server)
         if m2:
             findings.append(
@@ -530,7 +559,170 @@ def _detect_server(headers: dict[str, str]) -> list[Finding]:
             findings.append(
                 Finding("server", server.split()[0].lower(), None, 0.0, ("header:server",))
             )
+
+    # LiteSpeed は Server を隠していても X-LiteSpeed-Cache が残る
+    if _has_header(headers, "x-litespeed-cache") and "litespeed" not in server.lower():
+        findings.append(Finding("server", "litespeed", None, 0.0, ("header:x-litespeed-cache",)))
     return findings
+
+
+# --- CDN / セキュリティヘッダ / タグ / 画像配信（1.1.0）-------------------------
+#
+# 追加の通信はしない。すでに取得済みのヘッダとリソース URL だけで判定する。
+# 拡張（extension/detector.js）と**同じ内容・同じ順**にする。
+
+#: CDN の目印（ヘッダ）。一致したものはすべて出す。
+CDN_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("cloudflare", ("cf-ray", "cf-cache-status")),
+    ("cloudfront", ("x-amz-cf-id", "x-amz-cf-pop")),
+    ("fastly", ("x-fastly-request-id", "x-served-by")),
+    ("akamai", ("x-akamai-transformed", "akamai-grn", "x-akamai-request-id")),
+    ("vercel", ("x-vercel-id", "x-vercel-cache")),
+    ("netlify", ("x-nf-request-id",)),
+    ("azure", ("x-azure-ref",)),
+    ("google-cloud", ("x-cloud-trace-context",)),
+    ("sucuri", ("x-sucuri-id", "x-sucuri-cache")),
+    ("imperva", ("x-iinfo",)),
+)
+
+#: ``server`` ヘッダの前方一致 → CDN 名（CDN は「サーバ」行にしない）。
+CDN_SERVER_NAMES: tuple[tuple[str, str], ...] = (
+    ("cloudflare", "cloudflare"),
+    ("akamaighost", "akamai"),
+    ("vercel", "vercel"),
+    ("netlify", "netlify"),
+    ("google frontend", "google-cloud"),
+    ("gws", "google-cloud"),
+    ("bunnycdn", "bunny"),
+    ("keycdn", "keycdn"),
+    ("sucuri", "sucuri"),
+    ("github.com", "github-pages"),
+    ("windows-azure", "azure"),
+)
+
+#: セキュリティヘッダ（設定されているものだけ行にする）。
+SECURITY_HEADERS: tuple[tuple[str, str], ...] = (
+    ("hsts", "strict-transport-security"),
+    ("csp", "content-security-policy"),
+    ("x-frame-options", "x-frame-options"),
+    ("x-content-type-options", "x-content-type-options"),
+    ("referrer-policy", "referrer-policy"),
+    ("permissions-policy", "permissions-policy"),
+)
+
+#: 計測タグ（ホスト名 → 名前）。
+ANALYTICS_TAG_HOSTS: tuple[tuple[str, str], ...] = (
+    ("googletagmanager.com", "gtm"),
+    ("google-analytics.com", "ga4"),
+    ("clarity.ms", "clarity"),
+    ("hotjar.com", "hotjar"),
+    ("connect.facebook.net", "meta-pixel"),
+    ("analytics.tiktok.com", "tiktok-pixel"),
+    ("static.ads-twitter.com", "x-pixel"),
+    ("yjtag.jp", "yahoo-tag"),
+    ("line-scdn.net", "line-tag"),
+    ("bat.bing.com", "microsoft-uet"),
+    ("js.hs-scripts.com", "hubspot"),
+    ("assets.adobedtm.com", "adobe-analytics"),
+    ("cdn.segment.com", "segment"),
+    # 広告・国内タグ（1.1.0）
+    ("doubleclick.net", "google-ads"),
+    ("googlesyndication.com", "google-adsense"),
+    ("smartnews-ads.com", "smartnews-ads"),
+    ("microad.jp", "microad"),
+    ("d2c.ne.jp", "d2c"),
+    ("yjmg.jp", "yahoo-ads"),
+)
+
+#: 画像配信（ホスト名 → 名前）。Jetpack Photon は ``i0.wp.com`` 形式なので別扱い。
+IMAGE_CDN_HOSTS: tuple[tuple[str, str], ...] = (
+    ("cloudinary.com", "cloudinary"),
+    ("imgix.net", "imgix"),
+    ("ctfassets.net", "contentful"),
+    ("sanity.io", "sanity"),
+)
+
+_PHOTON_HOST_RE = re.compile(r"^i\d\.wp\.com$", re.I)
+_ANGULAR_VERSION_RE = re.compile(r"ng-version=[\"'](\d+(?:\.\d+)*)[\"']", re.I)
+_GTM_HOST = "googletagmanager.com"
+
+
+def _has_header(headers: dict[str, str], name: str) -> bool:
+    return str(headers.get(name, "")).strip() != ""
+
+
+def _cdn_from_server(headers: dict[str, str]) -> str | None:
+    """``server`` が CDN の名前なら、その CDN 名を返す（「サーバ」行にしないため）。"""
+    server = str(headers.get("server", "")).lower().strip()
+    if not server:
+        return None
+    for prefix, name in CDN_SERVER_NAMES:
+        if server.startswith(prefix):
+            return name
+    return None
+
+
+def _detect_cdn(headers: dict[str, str]) -> list[Finding]:
+    found: dict[str, str] = {}
+    for name, needles in CDN_SIGNATURES:
+        for header in needles:
+            if _has_header(headers, header):
+                found.setdefault(name, f"header:{header}")
+                break
+    if "cloudfront" not in found and "cloudfront.net" in headers.get("via", "").lower():
+        found["cloudfront"] = "header:via"
+    from_server = _cdn_from_server(headers)
+    if from_server and from_server not in found:
+        found[from_server] = "header:server"
+    return [Finding("cdn", name, None, 0.0, (evidence,)) for name, evidence in found.items()]
+
+
+def _detect_security_headers(headers: dict[str, str]) -> list[Finding]:
+    return [
+        Finding("security", name, None, 0.0, (f"header:{header}",))
+        for name, header in SECURITY_HEADERS
+        if _has_header(headers, header)
+    ]
+
+
+def _missing_security_headers(headers: dict[str, str]) -> list[str]:
+    """未設定のセキュリティヘッダ（注記用）。ヘッダが 1 つも取れていなければ空。"""
+    if not headers:
+        return []
+    return [name for name, header in SECURITY_HEADERS if not _has_header(headers, header)]
+
+
+def _detect_analytics_tags(resources: list[str]) -> list[Finding]:
+    found: dict[str, str] = {}
+    for url in resources:
+        parsed = urlparse(url)
+        host = parsed.netloc.lower().split(":")[0]
+        path = parsed.path.lower()
+        for domain, tag in ANALYTICS_TAG_HOSTS:
+            if not _host_matches(host, domain):
+                continue
+            # googletagmanager.com は ``/gtag/js``（GA4）と ``/gtm.js``（GTM）で名前を分ける
+            name = "ga4" if (domain == _GTM_HOST and "/gtag/js" in path) else tag
+            found.setdefault(name, f"host:{domain}")
+    return [Finding("tag", name, None, 0.0, (found[name],)) for name in sorted(found)]
+
+
+def _detect_image_cdn(resources: list[str]) -> list[Finding]:
+    found: dict[str, str] = {}
+    for url in resources:
+        host = urlparse(url).netloc.lower().split(":")[0]
+        if _PHOTON_HOST_RE.match(host):
+            found.setdefault("jetpack-photon", "host:i0.wp.com")
+        for domain, name in IMAGE_CDN_HOSTS:
+            if _host_matches(host, domain):
+                found.setdefault(name, f"host:{domain}")
+    return [Finding("image", name, None, 0.0, (found[name],)) for name in sorted(found)]
+
+
+def _detect_angular_version(html: str) -> Finding | None:
+    """Angular の版（``ng-version`` 属性にそのまま入っている）。"""
+    m = _ANGULAR_VERSION_RE.search(html)
+    return Finding("framework", "angular", m.group(1), 1.0, ("dom:ng-version",)) if m else None
 
 
 def analyze(url: str, html: str, headers: dict[str, str] | None = None) -> Analysis:
@@ -560,8 +752,25 @@ def analyze(url: str, html: str, headers: dict[str, str] | None = None) -> Analy
     analysis.findings.extend(_detect_themes(resources, html))
     analysis.findings.extend(_detect_shopify(html, resources))
     analysis.findings.extend(_detect_libraries(resources))
+    # Angular は ng-version に版がそのまま入っているので、フレームワーク行として先に出す
+    angular = _detect_angular_version(html)
+    if angular:
+        analysis.findings.append(angular)
     analysis.findings.extend(_detect_frameworks(html_lower))
     analysis.findings.extend(_detect_server(headers))
+    analysis.findings.extend(_detect_cdn(headers))
+    analysis.findings.extend(_detect_security_headers(headers))
+    analysis.findings.extend(_detect_analytics_tags(resources))
+    analysis.findings.extend(_detect_image_cdn(resources))
+
+    # ng-version で版が分かっているときは、JS ライブラリ側の angular 行を出さない
+    # （「JS angular」と「フレームワーク angular」の二重表示を避ける）
+    if angular:
+        analysis.findings = [
+            finding
+            for finding in analysis.findings
+            if not (finding.kind == "library" and finding.name == "angular")
+        ]
 
     if not analysis.platforms:
         analysis.notes.append("プラットフォームを判定できませんでした")
@@ -587,4 +796,11 @@ def analyze(url: str, html: str, headers: dict[str, str] | None = None) -> Analy
             analysis.notes.append(
                 f"このサイトは {others} 製です（プラグインや PHP の判定はありません）"
             )
+
+    # 未設定のセキュリティヘッダは「情報」にしておく（脆弱性ではないので赤・黄にはしない）
+    missing_headers = _missing_security_headers(headers)
+    if missing_headers:
+        analysis.notes.append(
+            f"未設定のセキュリティヘッダ: {', '.join(missing_headers)}（脆弱性ではありません）"
+        )
     return analysis
