@@ -305,6 +305,10 @@ uv run svc-enrich --index out/advisories.json
 https://akiramatsumoto-github.github.io/site-vuln-checker/advisories.json
 ```
 
+> Pages には `advisories.json` と `privacy.html` の 2 ファイルだけを置いています。そのため
+> `…/site-vuln-checker/`（ルート）は `index.html` が無く **404** になりますが、**仕様どおり**です
+> （拡張が読むのは上の `advisories.json` のみ、ストア審査で使うのは `privacy.html` のみ）。
+
 ### 3. 拡張を読み込む
 
 1. `chrome://extensions` を開く

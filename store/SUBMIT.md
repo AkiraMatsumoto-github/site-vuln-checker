@@ -48,7 +48,7 @@ Compress-Archive -Path "$stage\*" -DestinationPath svc-1.0.0.zip -Force
 | カテゴリ | 開発者ツール |
 | 言語 | 日本語 |
 | ストアアイコン（128×128） | `store/icon-128x128.png` |
-| スクリーンショット（1〜5 枚） | `store/screenshots/01-red-1280x800.png` ほか 2 枚 |
+| スクリーンショット（1〜5 枚） | `store/screenshots/01〜04-1280x800.png`（4 枚・1 枚目がサムネイル） |
 | 小さいプロモ画像（440×280） | `store/promo-440x280.png` |
 | マーキー画像（1400×560・任意） | 未作成（横長で別途デザインが必要） |
 | ホームページ URL（任意） | `https://github.com/AkiraMatsumoto-github/site-vuln-checker` |
@@ -170,3 +170,60 @@ WordPress or Automattic.
 | 問い合わせ | GitHub Issues に **3 営業日以内**の初回応答 |
 | 誤検知の報告 | 索引の元データ（NVD / OSV）を確認し、必要なら取り込み側で除外 |
 | プライバシーポリシー | 変更したら `docs/privacy.html` を更新（Pages へは publish-index が配信） |
+
+### 既知の表示：「セーフ ブラウジング保護強化機能で信頼されていません」
+
+`chrome://extensions` に「この拡張機能は、セーフ ブラウジング保護強化機能で信頼されていません」と出ることがある。
+**壊れている・危険という意味ではなく**、Google の信頼リストに入っていないという表示。
+
+| 状況 | 消し方 |
+| --- | --- |
+| デベロッパーモードで読み込んだ（unpacked） | **必ず出る**。ストア版に切り替えるか、設定 →「プライバシーとセキュリティ」→「セキュリティ」→ **標準保護機能**に下げる |
+| ストアからインストール（1.0.1 は 2026-11-03 公開） | 開発者側で消す操作はない。Google が基準（ストア掲載・開発者の検証・違反履歴なし・利用実績など）で判定し、満たすと外れる。**時期は非公開** |
+
+- 効くのは「違反ゼロのまま更新を続ける」「プライバシー申告と実装を一致させる」「権限を増やさない」の積み上げだけ。
+  マニフェストやコードの変更で消せるものではない
+- 個別の解除申請フォームはない（Chrome ウェブストアの One Stop Support で相談は可能）
+- 警告が出るのは **保護強化機能を ON にしている人だけ**（標準保護機能のユーザーには出ない）
+
+---
+
+## 9. 更新（1.0.1）
+
+公開済み（1.0.0）から更新するときの手順。**パッケージの差し替え＋審査依頼**が必要。
+
+### 1) ZIP を作る
+
+```powershell
+$stage = Join-Path $env:TEMP "svc-stage-101"
+Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $stage | Out-Null
+Copy-Item extension\* $stage -Recurse
+Remove-Item "$stage\tests", "$stage\README.md" -Recurse -Force
+Compress-Archive -Path "$stage\*" -DestinationPath svc-1.0.1.zip -Force
+```
+
+- [ ] `extension/manifest.json` の `version` が **1.0.1**
+- [ ] ZIP の直下に `manifest.json`／`tests` と `README.md` を含まない
+- [ ] 約 45 KB・14 ファイル（JS 9・CSS 1・HTML 1・アイコン 4）
+
+### 2) アップロードして審査依頼
+
+- [ ] 管理画面 → アイテム → **「パッケージ」タブ** → 新しい ZIP をアップロード
+- [ ] 「What's new」に下の文案を貼る
+- [ ] **「審査のために送信」**
+- [ ] 掲載情報（プロモ画像など）も同時に変えるなら、このタイミングで保存しておく
+
+### 2-2) ストア掲載情報を差し替える（スクリーンショット）
+
+- [ ] 「ストア掲載情報」→ スクリーンショットに `store/screenshots/01〜04-1280x800.png` の **4 枚**を順番にアップ（1.0.1 の UI。`tools/make_store_screenshots.ps1` で再生成できる）
+- [ ] 既存の 3 枚（旧 UI・`検出` 列）は**削除**する
+- [ ] 小さいプロモ画像（440×280）を `store/promo-440x280.png` に差し替え
+- [ ] 保存 → パッケージと同時に審査へ（掲載情報だけの変更でも審査の対象になる）
+
+### 3) What's new（文案）
+
+```
+・構成表の「検出」を「精度」に変え、Version が正しい確かさ（高 / 中 / 低）を示すようにしました。
+・アプリの説明文を分かりやすい表現に調整しました。
+```

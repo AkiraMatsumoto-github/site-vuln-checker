@@ -12,39 +12,56 @@ store/
   source/
     hero-1296x816.jpg   ← プロモ画像の元デザイン（1296×816。ここから 440×280 を作る）
   screenshots/
-    01-red.png                      元画像（1592×797）
+    01-red.png                      旧 UI の素材（1592×797）※使わない
+    02-green-info-gray.png          旧 UI の素材（1590×801）※使わない
+    03-site-health.png              素材（1452×827・サイトヘルス画面）→ 04 の元
+    10-permission-prompt-raw.png    素材（466×225・許可ダイアログ）※ストアでは使わない
+    11-result-red-raw.png           素材（423×432・判定結果 赤）→ 01 の元
+    12-result-green-gray-raw.png    素材（422×633・緑/情報/不明）→ 02 の元
+    13-composition-raw.png          素材（396×405・構成と Version/精度）→ 03 の元
     01-red-1280x800.png             ← ストア提出用（1280×800）
-    02-green-info-gray.png          元画像（1590×801）
     02-green-info-gray-1280x800.png ← ストア提出用（1280×800）
-    03-site-health.png              元画像（1452×827）
-    03-site-health-1280x800.png     ← ストア提出用（1280×800）
+    03-composition-1280x800.png     ← ストア提出用（1280×800）
+    04-sitehealth-1280x800.png      ← ストア提出用（1280×800）
 ```
 
-## スクリーンショット（3 枚）
+## スクリーンショット（4 枚）
 
 | # | 画像 | 内容 | 状態 |
 | --- | --- | --- | --- |
-| 1 | ![赤・黄](screenshots/01-red-1280x800.png) | 赤・黄（PHP 8.1.27 → 赤、黄は 0 件） | ✅ 提出可 |
-| 2 | ![緑・情報・不明](screenshots/02-green-info-gray-1280x800.png) | 緑（該当なし 2 件）・情報（jQuery）・不明（Version 不明のプラグイン） | ✅ 提出可（現在の UI で撮り直し済み） |
-| 3 | ![サイトヘルス](screenshots/03-site-health-1280x800.png) | サイトヘルスの「情報」タブ＋構成表 | ⚠ 判定結果（5 色）が写っていない。パネルを上にスクロールして撮る |
+| 1 | ![赤](screenshots/01-red-1280x800.png) | 判定結果の赤（php 8.1.1・サポート終了・攻撃実績あり） | ✅ 提出可（1.0.1 の UI） |
+| 2 | ![緑・情報・不明](screenshots/02-green-info-gray-1280x800.png) | 緑（該当なし）・情報・不明（Version 不明） | ✅ 提出可（1.0.1 の UI） |
+| 3 | ![構成](screenshots/03-composition-1280x800.png) | 構成表（Version・精度・根拠） | ✅ 提出可（1.0.1 の UI） |
+| 4 | ![サイトヘルス](screenshots/04-sitehealth-1280x800.png) | サイトヘルス「情報」タブ（**管理している WordPress のみ**） | ✅ 提出可（1.0.1 の UI） |
 
-- **サイズ**: 1280×800 または 640×400（この 2 つ以外は受け付けられません）。
-  元画像は仕様外だったため、**1280×800 に収まるよう縮小＋白余白で中央配置**した `*-1280x800.png` を作成済み（拡大はしていません）
-- **形式**: PNG（24-bit、アルファ無し）または JPEG。**1 枚目がストア一覧のサムネイル**になります
-- **被写体**: 自分のサイトか `example.com` 系の検証用サイト。**第三者の実サイト名は写さない**
-  （`02` は「Con Shift」のページ、`03` は WordPress の管理画面が写っています。**自分のサイトであること**を確認してください）
-- 新しい画像を入れたら、同じ手順で `*-1280x800.png` を作り直してください:
+- **サイズ**: 1280×800 または 640×400（この 2 つ以外は受け付けられません）。最大 5 枚・**1 枚目が一覧のサムネイル**
+- **形式**: PNG（24-bit、アルファ無し）または JPEG
+- **作り方**: 素材（`*-raw.png`）を `store/screenshots/` に置いて、スライド化はスクリプトに任せます
+
   ```powershell
-  Add-Type -AssemblyName System.Drawing
-  $img = [System.Drawing.Image]::FromFile("store\screenshots\01-red.png")
-  $scale = [Math]::Min(1280 / $img.Width, 800 / $img.Height)
-  $w = [int][Math]::Round($img.Width * $scale); $h = [int][Math]::Round($img.Height * $scale)
-  $bmp = New-Object System.Drawing.Bitmap 1280, 800
-  $g = [System.Drawing.Graphics]::FromImage($bmp)
-  $g.Clear([System.Drawing.Color]::White)
-  $g.DrawImage($img, [int]((1280 - $w) / 2), [int]((800 - $h) / 2), $w, $h)
-  $bmp.Save("store\screenshots\01-red-1280x800.png", [System.Drawing.Imaging.ImageFormat]::Png)
+  pwsh -File tools/make_store_screenshots.ps1
   ```
+
+  「淡いブルーの背景＋見出し＋パネル」の **1280×800 スライド**を作ります。パネルは縦横比を保って
+  **最大 1.6 倍**まで拡大（それ以上は文字がぼやける）。見出しの文言はスクリプト内の `$slides` で変えられます
+- **素材の対応**
+
+  | 出力 | 素材 | 中身 |
+  | --- | --- | --- |
+  | `01-red-1280x800.png` | `11-result-red-raw.png`（423×432） | 判定結果・赤 |
+  | `02-green-info-gray-1280x800.png` | `12-result-green-gray-raw.png`（422×633） | 判定結果・緑/情報/不明 |
+  | `03-composition-1280x800.png` | `13-composition-raw.png`（396×405） | 構成（Version・精度・根拠） |
+  | `04-sitehealth-1280x800.png` | `03-site-health.png` の左 1020px（1452×827） | サイトヘルス「情報」タブ |
+
+- **被写体**: 自分のサイト（`logishift.net`）で撮ったもの。**第三者の実サイトは写さない**
+- **04 の文言**: サイトヘルスの読み取りは **自分が管理する WordPress でしか使えない**（第三者のサイトでは
+  管理画面を開けないため不可）。「自動入力」ではなく「**管理者なら構成・Version を取得できる**」と書く
+- **`10-permission-prompt-raw.png` は使わない**（`logishift.net` への追加許可を求めるダイアログ。動作としては
+  正常だが、ストアでは「なぜそのドメインへの許可を求めるのか」と質問されやすい）
+- **旧 UI なので使わない素材**（撮影時点では最新ビルド。その後の変更で表示が変わった）
+  - `01-red.png`（10/31 13:05 撮影）: バージョン入力が**開いた状態**で、ラベルも「バージョンを入力（任意）」。
+    現行は `<details>` で既定は閉、ラベルは「バージョンを入力（任意・開発者向け）」（`cbddb28` 10/31 16:11）
+  - `02-green-info-gray.png`（10/31 14:52 撮影）: 構成表の列が **`検出`**。現行は **`精度`**（`673a78e` 11/01）
 
 
 ## プロモ画像・アイコン（作り直すとき）
@@ -73,15 +90,15 @@ pwsh -File tools/make_promo_from_source.ps1
 2. 対象のページを開く → ツールバーのアイコン → サイドパネルを開く
 3. 赤を出したい場合は、**実際に古い PHP／古いプラグインを使っている検証環境**（Local など）で撮る。
    手入力の欄は既定で畳んであるので、**開いた状態を写さない**（写すなら「開発者向けの機能」として説明できる形で）
-4. **ウィンドウ全体**を撮る（`Win + Shift + S`）。サイドパネルだけを撮って拡大すると粗くなるため、全体を撮って余白を整える
-5. 画像編集で 1280×800（または 640×400）に整える。**拡大はしない**（ぼやけます）。余白を足すのは可
-6. `store/screenshots/01-red.png` などに保存する
+4. サイドパネルの**パネル部分だけ**を切り抜く（`Win + Shift + S` の矩形選択）
+5. `store/screenshots/NN-xxx-raw.png` に保存 → `pwsh -File tools/make_store_screenshots.ps1`
+   （スライド化はスクリプトが行う。素材が小さいと拡大でぼやけるので、**幅 400px 以上**で撮る）
 
 ## 提出先（Chrome ウェブストア管理画面）
 
 | 項目 | 場所 | 使うファイル・値 |
 | --- | --- | --- |
-| スクリーンショット | 「ストア掲載情報」→ スクリーンショット | `store/screenshots/01〜03-1280x800.png`（1〜5 枚） |
+| スクリーンショット | 「ストア掲載情報」→ スクリーンショット | `store/screenshots/01〜04-1280x800.png`（4 枚・最大 5 枚） |
 | ストアアイコン | 同上（128×128） | `store/icon-128x128.png` |
 | 小さいプロモ画像 | 同上（440×280） | `store/promo-440x280.png`（一覧・カテゴリ枠で使われる） |
 | マーキー画像（任意） | 同上（1400×560） | 未作成（横長で別途デザインが必要） |

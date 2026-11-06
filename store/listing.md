@@ -117,8 +117,9 @@
 
 | 順 | ファイル | 内容 |
 | --- | --- | --- |
-| 1 | `store/screenshots/01-red-1280x800.png` | 赤・黄の判定 |
-| 2 | `store/screenshots/02-green-info-gray-1280x800.png` | 緑・情報・不明 |
-| 3 | `store/screenshots/03-site-health-1280x800.png` | サイトヘルスから読み取った構成 |
+| 1 | `store/screenshots/01-red-1280x800.png` | 赤の判定（危険度と根拠） |
+| 2 | `store/screenshots/02-green-info-gray-1280x800.png` | 緑・情報・不明の色分け |
+| 3 | `store/screenshots/03-composition-1280x800.png` | 構成と Version・精度・根拠 |
+| 4 | `store/screenshots/04-sitehealth-1280x800.png` | サイトヘルスから構成・Version を取得（WordPress の管理者のみ） |
 
 （サイズは 1280×800。1 枚目が一覧のサムネイルになります）
